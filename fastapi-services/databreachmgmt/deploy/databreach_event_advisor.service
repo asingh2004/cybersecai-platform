@@ -1,0 +1,33 @@
+# Put this file on your server at /etc/systemd/system/databreach_event_advisor.service
+
+#sudo systemctl daemon-reload
+#sudo systemctl enable databreach_event_advisor
+#sudo systemctl start databreach_event_advisor
+#sudo systemctl status databreach_event_advisor
+# For logs:
+#sudo tail -f /var/log/databreach_event_advisor.log
+#sudo tail -f /var/log/databreach_event_advisor_error.log
+
+[Unit]
+Description=Agentic AI FastAPI Gunicorn Agentic AI Data Breach Event Advisor
+After=network.target
+
+[Service]
+# Adjust these:
+User=cybersecai
+WorkingDirectory=/home/cybersecai/htdocs/www.cybersecai.io/fastapi-services/databreachmgmt
+Environment=OPENAI_API_KEY=${OPENAI_API_KEY}
+Environment="PATH=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin"
+
+# Activate your venv if you use one (recommended):
+ExecStart=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin/gunicorn -w 1 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8303 databreach_event_advisor:app
+
+# Logging
+StandardOutput=append:/var/log/databreach_event_advisor.log
+StandardError=append:/var/log/databreach_event_advisor_error.log
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

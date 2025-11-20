@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Defs_LGPD" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="LGPDIncidentProcess">
+    <bpmn:startEvent id="LGPDStart" name="Detecção de Incidente"/>
+    <bpmn:task id="A1" name="Análise de Risco"/>
+    <bpmn:task id="A2" name="Notifica Encarregado"/>
+    <bpmn:exclusiveGateway id="LGPDX1" name="Notificação Autoridade Necessária?"/>
+    <bpmn:task id="A3" name="Notifica ANPD/Titulares"/>
+    <bpmn:task id="A4" name="Registrar & Corrigir"/>
+    <bpmn:endEvent id="LGPD_END" name="Processo Finalizado"/>
+    <bpmn:sequenceFlow id="lg1" sourceRef="LGPDStart" targetRef="A1"/>
+    <bpmn:sequenceFlow id="lg2" sourceRef="A1" targetRef="A2"/>
+    <bpmn:sequenceFlow id="lg3" sourceRef="A2" targetRef="LGPDX1"/>
+    <bpmn:sequenceFlow id="lg4" sourceRef="LGPDX1" targetRef="A3"/>
+    <bpmn:sequenceFlow id="lg5" sourceRef="A3" targetRef="A4"/>
+    <bpmn:sequenceFlow id="lg6" sourceRef="LGPDX1" targetRef="A4"/>
+    <bpmn:sequenceFlow id="lg7" sourceRef="A4" targetRef="LGPD_END"/>
+  </bpmn:process>
+</bpmn:definitions>

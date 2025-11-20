@@ -1,0 +1,32 @@
+
+# Place this at: /etc/systemd/system/prod_db_privacy_discovery_service.service
+#sudo systemctl daemon-reload
+#sudo systemctl enable prod_db_privacy_discovery_service
+#sudo systemctl start prod_db_privacy_discovery_service
+#sudo systemctl status prod_db_privacy_discovery_service
+#sudo lsof -i :8205
+#sudo systemctl restart prod_db_privacy_discovery_service
+#sudo tail -n 50 /var/log/prod_db_privacy_discovery_service_error.log
+
+
+[Unit]
+Description=Database Privacy Discovery FastAPI Service (db_privacy_discover.py on 127.0.0.1:8205)
+After=network.target
+
+[Service]
+User=cybersecai
+WorkingDirectory=/home/cybersecai/htdocs/www.cybersecai.io/fastapi-services/Databases
+Environment=OPENAI_API_KEY=${OPENAI_API_KEY}
+Environment="PATH=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin"
+
+# Gunicorn/Uvicorn on your db_privacy_discover.py FastAPI app
+ExecStart=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin/gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8205 db_privacy_discover:app
+
+StandardOutput=append:/var/log/prod_db_privacy_discovery_service.log
+StandardError=append:/var/log/prod_db_privacy_discovery_service_error.log
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Defs_CCPA" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="CCPABreachProcess">
+    <bpmn:startEvent id="CCPAStart" name="Incident Identified"/>
+    <bpmn:task id="C1" name="Assess for CCPA Breach"/>
+    <bpmn:task id="C2" name="Notify Supervisors"/>
+    <bpmn:exclusiveGateway id="CCPAXG1" name="External Notification Required?"/>
+    <bpmn:task id="C3" name="Notify California Residents / AG"/>
+    <bpmn:task id="C4" name="Document & Correct"/>
+    <bpmn:endEvent id="CCPAEnd" name="Closed"/>
+    <bpmn:sequenceFlow id="c1" sourceRef="CCPAStart" targetRef="C1"/>
+    <bpmn:sequenceFlow id="c2" sourceRef="C1" targetRef="C2"/>
+    <bpmn:sequenceFlow id="c3" sourceRef="C2" targetRef="CCPAXG1"/>
+    <bpmn:sequenceFlow id="c4" sourceRef="CCPAXG1" targetRef="C3"/>
+    <bpmn:sequenceFlow id="c5" sourceRef="C3" targetRef="C4"/>
+    <bpmn:sequenceFlow id="c6" sourceRef="CCPAXG1" targetRef="C4"/>
+    <bpmn:sequenceFlow id="c7" sourceRef="C4" targetRef="CCPAEnd"/>
+  </bpmn:process>
+</bpmn:definitions>

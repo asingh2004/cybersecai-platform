@@ -1,0 +1,1 @@
+https://graph.microsoft.com/v1.0/users/cabd004a-a7cf-4fab-820e-859b3103317a/drive/root/delta?token=NDslMjM0OyUyMzE7MzsxZjQwMjY3Mi0yMGYyLTRkODktYTM4Ni00MzFkODczYmYwYzY7NjM4OTkyMDQ0MTIxOTAwMDAwOzE5NjAxNjA3NDslMjM7JTIzOyUyMzA7JTIz

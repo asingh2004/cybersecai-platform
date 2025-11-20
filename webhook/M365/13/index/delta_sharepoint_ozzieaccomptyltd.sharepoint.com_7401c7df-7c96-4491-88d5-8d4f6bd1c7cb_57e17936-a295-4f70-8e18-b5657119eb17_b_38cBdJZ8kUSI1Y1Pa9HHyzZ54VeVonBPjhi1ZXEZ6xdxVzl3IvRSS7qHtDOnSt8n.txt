@@ -1,0 +1,1 @@
+https://graph.microsoft.com/v1.0/sites/ozzieaccomptyltd.sharepoint.com,7401c7df-7c96-4491-88d5-8d4f6bd1c7cb,57e17936-a295-4f70-8e18-b5657119eb17/drives/b!38cBdJZ8kUSI1Y1Pa9HHyzZ54VeVonBPjhi1ZXEZ6xdxVzl3IvRSS7qHtDOnSt8n/root/delta?token=NDslMjM0OyUyMzE7Mzs3NzM5NTc3MS1mNDIyLTRiNTItYmE4Ny1iNDMzYTc0YWRmMjc7NjM4OTkyMDQ0MDY4MTMwMDAwOzE5NjAxNjA2NjslMjM7JTIzOyUyMzA7JTIz

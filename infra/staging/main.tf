@@ -1,0 +1,334 @@
+## WHAT IS THIS TERRAFORM DOING?
+## Creates a secured VPC with two subnets across two AZs (for HA/prod ready).
+## Creates security group for ECS, RDS, Redis traffic.
+## Creates an ECR repository for you to push your Laravel app Docker images.
+## Creates SQS (for queue jobs).
+## Creates an S3 bucket with versioning for assets/storage.
+## Creates a CloudWatch log group for ECS container logs.
+## Provisions an RDS MySQL DB (private, password/policy best practices).
+## Provisions Redis (ElastiCache) across both subnets.
+## Creates secrets for your APP_KEY and DB password in Secrets Manager.
+## Creates an ECS cluster (empty — you'll define services/tasks in a separate file).
+## IAM task execution role for ECS services (with ECR, S3, Secrets, and log permissions).
+###############################################################################
+# MAIN PRODUCTION‑READY INFRASTRUCTURE
+###############################################################################
+
+###############################################################################
+# MAIN PRODUCTION‑READY INFRASTRUCTURE
+###############################################################################
+
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+
+  backend "s3" {
+    bucket = "telkin-terraform-backend"
+    key    = "staging/terraform.tfstate"
+    region = "ap-southeast-2"
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+#####################
+# ── Data Sources ──
+#####################
+data "aws_caller_identity" "current" {}
+data "aws_availability_zones" "available" {}
+
+#####################
+# ── Networking  ───
+#####################
+resource "aws_vpc" "main" {
+  cidr_block           = "10.10.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+  tags = { Name = "${var.project}-${var.env}-vpc" }
+}
+
+resource "aws_internet_gateway" "igw" {
+  vpc_id = aws_vpc.main.id
+  tags   = { Name = "${var.project}-${var.env}-igw" }
+}
+
+resource "aws_subnet" "public_1" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.10.0.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[0]
+  map_public_ip_on_launch = true
+  tags = { Name = "${var.project}-${var.env}-public1" }
+}
+
+resource "aws_subnet" "public_2" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.10.3.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[1]
+  map_public_ip_on_launch = true
+  tags = { Name = "${var.project}-${var.env}-public2" }
+}
+
+resource "aws_subnet" "private_1" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.10.1.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0]
+  tags = { Name = "${var.project}-${var.env}-priv1" }
+}
+
+resource "aws_subnet" "private_2" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.10.2.0/24"
+  availability_zone = data.aws_availability_zones.available.names[1]
+  tags = { Name = "${var.project}-${var.env}-priv2" }
+}
+
+resource "aws_eip" "nat" {
+  domain = "vpc"
+  tags   = { Name = "${var.project}-${var.env}-nat-eip" }
+}
+
+resource "aws_nat_gateway" "natgw" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public_1.id
+  tags          = { Name = "${var.project}-${var.env}-natgw" }
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.igw.id
+  }
+  tags = { Name = "${var.project}-${var.env}-publicrt" }
+}
+resource "aws_route_table_association" "public_1" {
+  subnet_id      = aws_subnet.public_1.id
+  route_table_id = aws_route_table.public.id
+}
+resource "aws_route_table_association" "public_2" {
+  subnet_id      = aws_subnet.public_2.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.main.id
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.natgw.id
+  }
+  tags = { Name = "${var.project}-${var.env}-privatert" }
+}
+resource "aws_route_table_association" "private_1" {
+  subnet_id      = aws_subnet.private_1.id
+  route_table_id = aws_route_table.private.id
+}
+resource "aws_route_table_association" "private_2" {
+  subnet_id      = aws_subnet.private_2.id
+  route_table_id = aws_route_table.private.id
+}
+
+############################
+# ── Security Groups ──────
+############################
+resource "aws_security_group" "ecs_sg" {
+  name        = "${var.project}-${var.env}-ecs-sg"
+  description = "ECS containers allow web over ALB"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+############################
+# ── ECR for images ───────
+############################
+locals {
+  repositories = [
+    "laravel-php",
+    "laravel-nginx",
+    "agentic_orchestrator_service",
+    "agentic_service",
+    "databreach_event_advisor",
+    "databreach_step1",
+    "databreach_step2",
+    "databreach_step3",
+    "prod_agentic_orchestrator_service",
+    "prod_db_privacy_discovery_service",
+    "webhook_server"
+  ]
+}
+
+resource "aws_ecr_repository" "repos" {
+  for_each = toset(local.repositories)
+  name     = "${var.project}-${var.env}-${each.key}"
+  image_scanning_configuration { scan_on_push = true }
+  lifecycle { prevent_destroy = false }
+}
+
+############################
+# ── ECS Cluster ──────────
+############################
+resource "aws_ecs_cluster" "main" {
+  name = "${var.project}-${var.env}-ecs-cluster"
+}
+
+############################
+# ── SQS + S3 + Logs ──────
+############################
+resource "aws_sqs_queue" "queue" {
+  name = "${var.project}-${var.env}-queue"
+}
+
+resource "aws_s3_bucket" "assets" {
+  bucket        = "${var.project}-${var.env}-assets"
+  force_destroy = false
+}
+resource "aws_s3_bucket_versioning" "assets" {
+  bucket = aws_s3_bucket.assets.id
+  versioning_configuration { status = "Enabled" }
+}
+
+resource "aws_cloudwatch_log_group" "laravel" {
+  name              = "/ecs/${var.project}/${var.env}"
+  retention_in_days = 30
+}
+
+############################
+# ── DB + Redis ───────────
+############################
+resource "aws_db_subnet_group" "main" {
+  name       = "${var.project}-${var.env}-dbsubnet"
+  subnet_ids = [aws_subnet.private_1.id, aws_subnet.private_2.id]
+}
+
+resource "aws_db_instance" "main" {
+  identifier              = "${var.project}-${var.env}-db"
+  engine                  = "mysql"
+  engine_version          = "8.0"
+  instance_class          = "db.t3.micro"
+  allocated_storage       = 20
+  username                = var.db_user
+  password                = var.db_password
+
+  # 👉 Correct property name
+  db_name                 = var.db_name
+
+  db_subnet_group_name    = aws_db_subnet_group.main.id
+  vpc_security_group_ids  = [aws_security_group.ecs_sg.id]
+  skip_final_snapshot     = true
+  publicly_accessible     = false
+}
+
+resource "aws_elasticache_subnet_group" "main" {
+  name       = "${var.project}-${var.env}-redis-subnet"
+  subnet_ids = [aws_subnet.private_1.id, aws_subnet.private_2.id]
+}
+
+resource "aws_elasticache_cluster" "main" {
+  cluster_id           = "${var.project}-${var.env}-redis"
+  engine               = "redis"
+  engine_version       = "7.0"              # add this line
+  node_type            = "cache.t3.micro"
+  num_cache_nodes      = 1
+  parameter_group_name = "default.redis7"   # update family
+  subnet_group_name    = aws_elasticache_subnet_group.main.id
+  security_group_ids   = [aws_security_group.ecs_sg.id]
+}
+
+############################
+# ── Secrets & IAM Roles ──
+############################
+resource "aws_secretsmanager_secret" "app_key" {
+  name = "${var.project}-${var.env}-app-key"
+}
+resource "aws_secretsmanager_secret_version" "app_key" {
+  secret_id     = aws_secretsmanager_secret.app_key.id
+  secret_string = var.app_key
+}
+
+resource "aws_secretsmanager_secret" "db_password" {
+  name = "${var.project}-${var.env}-db-password"
+}
+resource "aws_secretsmanager_secret_version" "db_password" {
+  secret_id     = aws_secretsmanager_secret.db_password.id
+  secret_string = var.db_password
+}
+
+# Assume‑role policy for ECS tasks
+data "aws_iam_policy_document" "ecs_task_execution_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+# Permissions the task execution role needs
+data "aws_iam_policy_document" "ecs_task_execution" {
+  statement {
+    actions = [
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:CreateLogGroup",
+      "secretsmanager:GetSecretValue",
+      "kms:Decrypt",
+      "s3:PutObject",
+      "s3:GetObject"
+    ]
+    resources = ["*"]
+  }
+}
+
+# IAM Role definition
+resource "aws_iam_role" "ecs_task_execution" {
+  name               = "${var.project}-${var.env}-ecs-task-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_execution_assume.json
+  tags               = { Name = "${var.project}-${var.env}-ecs-task-execution" }
+}
+
+# ✅ Inline policy split out to a separate resource (removes "inline_policy" deprecation)
+resource "aws_iam_role_policy" "ecs_execution" {
+  name   = "ecsExecution"
+  role   = aws_iam_role.ecs_task_execution.id
+  policy = data.aws_iam_policy_document.ecs_task_execution.json
+}
+
+############################
+# ── Outputs ──────────────
+############################
+output "vpc_id"                 { value = aws_vpc.main.id }
+output "private_subnet_1"       { value = aws_subnet.private_1.id }
+output "private_subnet_2"       { value = aws_subnet.private_2.id }
+output "ecs_cluster_id"         { value = aws_ecs_cluster.main.id }
+output "ecr_repo_urls"          { value = [for r in aws_ecr_repository.repos : r.repository_url] }
+output "s3_bucket"              { value = aws_s3_bucket.assets.id }
+output "rds_endpoint"           { value = aws_db_instance.main.endpoint }
+output "redis_endpoint"         { value = aws_elasticache_cluster.main.cache_nodes[0].address }
+output "sqs_queue_url"          { value = aws_sqs_queue.queue.id }
+output "cloudwatch_log_group"   { value = aws_cloudwatch_log_group.laravel.name }
+output "ecs_sg_id"              { value = aws_security_group.ecs_sg.id }
+output "secret_app_key"         { value = aws_secretsmanager_secret.app_key.arn }
+output "secret_db_password"     { value = aws_secretsmanager_secret.db_password.arn }

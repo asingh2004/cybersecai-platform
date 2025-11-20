@@ -1,0 +1,33 @@
+# Put this file on your server at /etc/systemd/system/agentic_orchestrator_service.service
+
+#sudo systemctl daemon-reload
+#sudo systemctl enable agentic_orchestrator_service
+#sudo systemctl start agentic_orchestrator_service
+#sudo systemctl status agentic_orchestrator_service
+# For logs:
+#sudo tail -f /var/log/agentic_orchestrator_service.log
+#sudo tail -f /var/log/agentic_orchestrator_service_error.log
+
+[Unit]
+Description=Agentic AI FastAPI Gunicorn Agentic Orchestrator Driven AI Service
+After=network.target
+
+[Service]
+# Adjust these:
+User=cybersecai
+WorkingDirectory=/home/cybersecai/htdocs/www.cybersecai.io/fastapi-services/agenticai
+Environment=OPENAI_API_KEY=${OPENAI_API_KEY}
+Environment="PATH=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin"
+
+# Activate your venv if you use one (recommended):
+ExecStart=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin/gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8223 agentic_orchestrator_service:app
+
+# Logging
+StandardOutput=append:/var/log/agentic_orchestrator_service.log
+StandardError=append:/var/log/agentic_orchestrator_service_error.log
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

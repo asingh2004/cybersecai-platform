@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+scikit-learn
+stable-baselines3
+gymnasium
+joblib
+numpy
+pydantic
+redis
+requests
+python-dotenv

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 88">
+  <!-- Shield outline -->
+  <path d="M45 8C60 20 80 19 80 39c0 48-35 39-35 39S10 87 10 39C10 19 30 20 45 8z"
+        fill="#fff" stroke="#1877c2" stroke-width="4"/>
+  <!-- Checkmark for compliance -->
+  <polyline points="32,53 43,64 62,38" fill="none" stroke="#36d399" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Rows of blocks for "unified" -->
+  <rect x="28" y="29" width="11" height="6" rx="2" fill="#b4e6fb"/>
+  <rect x="41" y="29" width="10" height="6" rx="2" fill="#b4e6fb"/>
+  <rect x="53" y="29" width="9" height="6" rx="2" fill="#b4e6fb"/>
+  <rect x="35.5" y="38" width="20" height="6" rx="2" fill="#b4e6fb"/>
+</svg>

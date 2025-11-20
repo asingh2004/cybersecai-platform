@@ -1,0 +1,28 @@
+
+# Place this at: /etc/systemd/system/prod_agentic_orchestrator_service.service
+#sudo systemctl daemon-reload
+#sudo systemctl enable prod_agentic_orchestrator_service
+#sudo systemctl start prod_agentic_orchestrator_service
+#sudo systemctl status prod_agentic_orchestrator_service
+
+[Unit]
+Description=Agentic AI FastAPI Orchestrator Service (PROD main.py version)
+After=network.target
+
+[Service]
+User=cybersecai
+WorkingDirectory=/home/cybersecai/htdocs/www.cybersecai.io/fastapi-services/agenticai
+Environment=OPENAI_API_KEY=${OPENAI_API_KEY}
+Environment="PATH=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin"
+
+# Gunicorn on main.py entrypoint with the app object
+ExecStart=/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin/gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8224 main:app
+
+StandardOutput=append:/var/log/prod_agentic_orchestrator_service.log
+StandardError=append:/var/log/prod_agentic_orchestrator_service_error.log
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
