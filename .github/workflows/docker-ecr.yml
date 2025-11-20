@@ -19,6 +19,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Install PHP + Composer on the runner so Composer runs on the GitHub host (avoids OOM inside container)
+      - name: Setup PHP and Composer on runner
+        uses: shivammathur/setup-php@v3
+        with:
+          php-version: '8.4'
+          tools: composer:2
+          coverage: none
+
+      - name: Cache Composer cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Composer validate, clear cache and install dependencies (on runner)
+        env:
+          COMPOSER_MEMORY_LIMIT: -1
+          COMPOSER_ALLOW_SUPERUSER: 1
+        run: |
+          composer --version
+          composer clear-cache
+          composer validate --no-check-publish || true
+          # Install production deps to include vendor in the workspace before docker build
+          composer install --no-dev --no-interaction --prefer-dist --no-scripts --no-progress --verbose
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -36,7 +63,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build --target php -t $ECR_REPO:$IMAGE_TAG -f Dockerfile.app .
+          docker build --progress=plain --target php -t $ECR_REPO:$IMAGE_TAG -f Dockerfile.app .
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -47,7 +74,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build --target nginx -t $ECR_REPO:$IMAGE_TAG -f Dockerfile.app .
+          docker build --progress=plain --target nginx -t $ECR_REPO:$IMAGE_TAG -f Dockerfile.app .
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -58,7 +85,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -69,7 +96,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -80,7 +107,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -91,7 +118,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -102,7 +129,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -113,7 +140,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -124,7 +151,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -135,7 +162,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/Databases/Dockerfile.fastapi ./fastapi-services/Databases
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/Databases/Dockerfile.fastapi ./fastapi-services/Databases
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
 
@@ -146,6 +173,6 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: latest
         run: |
-          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/webhook/Dockerfile.fastapi ./fastapi-services/webhook
+          docker build --progress=plain -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/webhook/Dockerfile.fastapi ./fastapi-services/webhook
           docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
