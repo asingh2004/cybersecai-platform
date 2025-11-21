@@ -1,0 +1,63 @@
+name: Deploy Service to ECS
+description: Update ECS Task Definition and Service with new container image
+inputs:
+  CLUSTER:
+    required: true
+    description: ECS Cluster name
+  SERVICE:
+    required: true
+    description: ECS Service name
+  CONTAINER_NAME:
+    required: true
+    description: Name of the container in ECS Task Definition
+  IMAGE:
+    required: true
+    description: FULL image URI (:tag!) for new deployment
+  AWS_REGION:
+    required: true
+    description: AWS Region (e.g. ap-southeast-2)
+
+runs:
+  using: composite
+  steps:
+    - run: |
+        set -e
+        echo "🛠️ Deploying ${{ inputs.IMAGE }} to container ${{ inputs.CONTAINER_NAME }} in service ${{ inputs.SERVICE }} / ${{ inputs.CLUSTER }}"
+        aws ecs describe-task-definition \
+          --task-definition ${{ inputs.SERVICE }} \
+          --region ${{ inputs.AWS_REGION }} \
+          --query taskDefinition > task-def.json
+
+        jq --arg IMAGE "${{ inputs.IMAGE }}" \
+           --arg NAME "${{ inputs.CONTAINER_NAME }}" \
+           '(.containerDefinitions[] | select(.name == $NAME) | .image) = $IMAGE' \
+           task-def.json > new-task-def.json
+
+        jq 'del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+           )' new-task-def.json > final-task-def.json
+
+        td_arn=$(aws ecs register-task-definition \
+          --cli-input-json file://final-task-def.json \
+          --region ${{ inputs.AWS_REGION }} \
+          --query 'taskDefinition.taskDefinitionArn' --output text)
+        echo "New task definition revision: $td_arn"
+
+        aws ecs update-service \
+          --cluster ${{ inputs.CLUSTER }} \
+          --service ${{ inputs.SERVICE }} \
+          --task-definition $td_arn \
+          --region ${{ inputs.AWS_REGION }} \
+          --force-new-deployment
+
+        aws ecs wait services-stable \
+          --cluster ${{ inputs.CLUSTER }} \
+          --services ${{ inputs.SERVICE }} \
+          --region ${{ inputs.AWS_REGION }}
+      shell: bash
