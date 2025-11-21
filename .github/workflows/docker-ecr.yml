@@ -29,16 +29,21 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      ##################################################
+      #############################################################################
       # 1. Laravel PHP-FPM
-      ##################################################
+      #############################################################################
       - name: Build and Push Laravel PHP-FPM
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build --target php -t mochanai-staging-laravel-php:$IMAGE_TAG -f Dockerfile.app .
+          docker build --target php \
+            -t mochanai-staging-laravel-php:latest \
+            -t mochanai-staging-laravel-php:$IMAGE_TAG \
+            -f Dockerfile.app .
+          docker tag mochanai-staging-laravel-php:latest $ECR_REGISTRY/mochanai-staging-laravel-php:latest
           docker tag mochanai-staging-laravel-php:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-laravel-php:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-laravel-php:latest
           docker push $ECR_REGISTRY/mochanai-staging-laravel-php:$IMAGE_TAG
 
       - name: Deploy Laravel PHP-FPM to ECS
@@ -50,16 +55,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 2. Laravel Nginx
-      ##################################################
+      #############################################################################
       - name: Build and Push Laravel Nginx
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build --target nginx -t mochanai-staging-laravel-nginx:$IMAGE_TAG -f Dockerfile.app .
+          docker build --target nginx \
+            -t mochanai-staging-laravel-nginx:latest \
+            -t mochanai-staging-laravel-nginx:$IMAGE_TAG \
+            -f Dockerfile.app .
+          docker tag mochanai-staging-laravel-nginx:latest $ECR_REGISTRY/mochanai-staging-laravel-nginx:latest
           docker tag mochanai-staging-laravel-nginx:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-laravel-nginx:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-laravel-nginx:latest
           docker push $ECR_REGISTRY/mochanai-staging-laravel-nginx:$IMAGE_TAG
 
       - name: Deploy Laravel Nginx to ECS
@@ -71,16 +81,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
-      # 3. Agentic Orchestrator
-      ##################################################
+      #############################################################################
+      # 3. Agentic Orchestrator Service
+      #############################################################################
       - name: Build and Push Agentic Orchestrator
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-agentic_orchestrator_service:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build \
+            -t mochanai-staging-agentic_orchestrator_service:latest \
+            -t mochanai-staging-agentic_orchestrator_service:$IMAGE_TAG \
+            -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker tag mochanai-staging-agentic_orchestrator_service:latest $ECR_REGISTRY/mochanai-staging-agentic_orchestrator_service:latest
           docker tag mochanai-staging-agentic_orchestrator_service:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-agentic_orchestrator_service:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-agentic_orchestrator_service:latest
           docker push $ECR_REGISTRY/mochanai-staging-agentic_orchestrator_service:$IMAGE_TAG
 
       - name: Deploy Agentic Orchestrator to ECS
@@ -92,16 +107,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic_orchestrator_service:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 4. Agentic Service
-      ##################################################
+      #############################################################################
       - name: Build and Push Agentic Service
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-agentic_service:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build \
+            -t mochanai-staging-agentic_service:latest \
+            -t mochanai-staging-agentic_service:$IMAGE_TAG \
+            -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker tag mochanai-staging-agentic_service:latest $ECR_REGISTRY/mochanai-staging-agentic_service:latest
           docker tag mochanai-staging-agentic_service:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-agentic_service:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-agentic_service:latest
           docker push $ECR_REGISTRY/mochanai-staging-agentic_service:$IMAGE_TAG
 
       - name: Deploy Agentic Service to ECS
@@ -113,16 +133,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic_service:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 5. Databreach Event Advisor
-      ##################################################
+      #############################################################################
       - name: Build and Push Databreach Event Advisor
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-databreach_event_advisor:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build \
+            -t mochanai-staging-databreach_event_advisor:latest \
+            -t mochanai-staging-databreach_event_advisor:$IMAGE_TAG \
+            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag mochanai-staging-databreach_event_advisor:latest $ECR_REGISTRY/mochanai-staging-databreach_event_advisor:latest
           docker tag mochanai-staging-databreach_event_advisor:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-databreach_event_advisor:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-databreach_event_advisor:latest
           docker push $ECR_REGISTRY/mochanai-staging-databreach_event_advisor:$IMAGE_TAG
 
       - name: Deploy Databreach Event Advisor to ECS
@@ -134,16 +159,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach_event_advisor:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 6. Databreach Step 1
-      ##################################################
+      #############################################################################
       - name: Build and Push Databreach Step 1
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-databreach_step1:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build \
+            -t mochanai-staging-databreach_step1:latest \
+            -t mochanai-staging-databreach_step1:$IMAGE_TAG \
+            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag mochanai-staging-databreach_step1:latest $ECR_REGISTRY/mochanai-staging-databreach_step1:latest
           docker tag mochanai-staging-databreach_step1:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-databreach_step1:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-databreach_step1:latest
           docker push $ECR_REGISTRY/mochanai-staging-databreach_step1:$IMAGE_TAG
 
       - name: Deploy Databreach Step 1 to ECS
@@ -155,16 +185,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach_step1:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 7. Databreach Step 2
-      ##################################################
+      #############################################################################
       - name: Build and Push Databreach Step 2
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-databreach_step2:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build \
+            -t mochanai-staging-databreach_step2:latest \
+            -t mochanai-staging-databreach_step2:$IMAGE_TAG \
+            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag mochanai-staging-databreach_step2:latest $ECR_REGISTRY/mochanai-staging-databreach_step2:latest
           docker tag mochanai-staging-databreach_step2:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-databreach_step2:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-databreach_step2:latest
           docker push $ECR_REGISTRY/mochanai-staging-databreach_step2:$IMAGE_TAG
 
       - name: Deploy Databreach Step 2 to ECS
@@ -176,16 +211,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach_step2:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 8. Databreach Step 3
-      ##################################################
+      #############################################################################
       - name: Build and Push Databreach Step 3
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-databreach_step3:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build \
+            -t mochanai-staging-databreach_step3:latest \
+            -t mochanai-staging-databreach_step3:$IMAGE_TAG \
+            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag mochanai-staging-databreach_step3:latest $ECR_REGISTRY/mochanai-staging-databreach_step3:latest
           docker tag mochanai-staging-databreach_step3:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-databreach_step3:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-databreach_step3:latest
           docker push $ECR_REGISTRY/mochanai-staging-databreach_step3:$IMAGE_TAG
 
       - name: Deploy Databreach Step 3 to ECS
@@ -197,16 +237,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach_step3:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 9. PROD Agentic Orchestrator Service
-      ##################################################
+      #############################################################################
       - name: Build and Push PROD Agentic Orchestrator
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-prod_agentic_orchestrator_service:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build \
+            -t mochanai-staging-prod_agentic_orchestrator_service:latest \
+            -t mochanai-staging-prod_agentic_orchestrator_service:$IMAGE_TAG \
+            -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker tag mochanai-staging-prod_agentic_orchestrator_service:latest $ECR_REGISTRY/mochanai-staging-prod_agentic_orchestrator_service:latest
           docker tag mochanai-staging-prod_agentic_orchestrator_service:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-prod_agentic_orchestrator_service:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-prod_agentic_orchestrator_service:latest
           docker push $ECR_REGISTRY/mochanai-staging-prod_agentic_orchestrator_service:$IMAGE_TAG
 
       - name: Deploy PROD Agentic Orchestrator to ECS
@@ -218,16 +263,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod_agentic_orchestrator_service:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 10. PROD DB Privacy Discovery Service
-      ##################################################
+      #############################################################################
       - name: Build and Push PROD DB Privacy Discovery Service
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-prod_db_privacy_discovery_service:$IMAGE_TAG -f ./fastapi-services/Databases/Dockerfile.fastapi ./fastapi-services/Databases
+          docker build \
+            -t mochanai-staging-prod_db_privacy_discovery_service:latest \
+            -t mochanai-staging-prod_db_privacy_discovery_service:$IMAGE_TAG \
+            -f ./fastapi-services/Databases/Dockerfile.fastapi ./fastapi-services/Databases
+          docker tag mochanai-staging-prod_db_privacy_discovery_service:latest $ECR_REGISTRY/mochanai-staging-prod_db_privacy_discovery_service:latest
           docker tag mochanai-staging-prod_db_privacy_discovery_service:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-prod_db_privacy_discovery_service:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-prod_db_privacy_discovery_service:latest
           docker push $ECR_REGISTRY/mochanai-staging-prod_db_privacy_discovery_service:$IMAGE_TAG
 
       - name: Deploy PROD DB Privacy Discovery Service to ECS
@@ -239,16 +289,21 @@ jobs:
           IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod_db_privacy_discovery_service:${{ github.sha }}
           AWS_REGION: ${{ env.AWS_REGION }}
 
-      ##################################################
+      #############################################################################
       # 11. Webhook Server
-      ##################################################
+      #############################################################################
       - name: Build and Push Webhook Server
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t mochanai-staging-webhook_server:$IMAGE_TAG -f ./fastapi-services/webhook/Dockerfile.fastapi ./fastapi-services/webhook
+          docker build \
+            -t mochanai-staging-webhook_server:latest \
+            -t mochanai-staging-webhook_server:$IMAGE_TAG \
+            -f ./fastapi-services/webhook/Dockerfile.fastapi ./fastapi-services/webhook
+          docker tag mochanai-staging-webhook_server:latest $ECR_REGISTRY/mochanai-staging-webhook_server:latest
           docker tag mochanai-staging-webhook_server:$IMAGE_TAG $ECR_REGISTRY/mochanai-staging-webhook_server:$IMAGE_TAG
+          docker push $ECR_REGISTRY/mochanai-staging-webhook_server:latest
           docker push $ECR_REGISTRY/mochanai-staging-webhook_server:$IMAGE_TAG
 
       - name: Deploy Webhook Server to ECS
