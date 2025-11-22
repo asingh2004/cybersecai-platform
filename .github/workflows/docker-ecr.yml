@@ -52,7 +52,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-laravel-php
         CONTAINER_NAME: laravel-php
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -78,7 +78,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-laravel-nginx
         CONTAINER_NAME: laravel-nginx
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -104,7 +104,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-agentic-orchestrator
         CONTAINER_NAME: agentic_orchestrator_service
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-orchestrator-service:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-orchestrator-service:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -130,7 +130,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-agentic-service
         CONTAINER_NAME: agentic_service
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-service:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-service:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -156,7 +156,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-databreach-event-advisor
         CONTAINER_NAME: databreach_event_advisor
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-event-advisor:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-event-advisor:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -182,7 +182,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-databreach-step1
         CONTAINER_NAME: databreach_step1
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step1:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step1:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -208,7 +208,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-databreach-step2
         CONTAINER_NAME: databreach_step2
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step2:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step2:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -234,7 +234,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-databreach-step3
         CONTAINER_NAME: databreach_step3
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step3:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step3:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -260,7 +260,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-prod-agentic-orchestrator
         CONTAINER_NAME: prod_agentic_orchestrator_service
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-agentic-orchestrator-service:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-agentic-orchestrator-service:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -286,7 +286,7 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-prod-db-privacy-discovery-service
         CONTAINER_NAME: prod_db_privacy_discovery_service
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-db-privacy-discovery-service:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-db-privacy-discovery-service:latest
         AWS_REGION: ${{ env.AWS_REGION }}
 
     ##############################################
@@ -312,5 +312,5 @@ jobs:
         CLUSTER: mochanai-staging-ecs-cluster
         SERVICE: mochanai-staging-webhook-server
         CONTAINER_NAME: webhook_server
-        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-webhook-server:${{ github.sha }}
+        IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-webhook-server:latest
         AWS_REGION: ${{ env.AWS_REGION }}
