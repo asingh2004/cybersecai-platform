@@ -29,55 +29,61 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      #######################################
-      # 1. Laravel PHP-FPM
-      #######################################
-      - name: Build and Push Laravel PHP-FPM
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-laravel-php"
-          docker build --target php \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f Dockerfile.app .
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
+     #######################################
+# 1. Build and Push Laravel PHP-FPM
+#######################################
+- name: Build and Push Laravel PHP-FPM
+  env:
+    ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+    IMAGE_TAG: ${{ github.sha }}
+  run: |
+    ECR_REPO="$ECR_REGISTRY/mochanai-staging-laravel-php"
+    docker build --target php \
+      -t $ECR_REPO:latest \
+      -t $ECR_REPO:$IMAGE_TAG \
+      -f Dockerfile.app .
+    docker push $ECR_REPO:latest
+    docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Deploy Laravel PHP-FPM to ECS
-        uses: ./.github/actions/deploy-to-ecs
-        with:
-          CLUSTER: mochanai-staging-ecs-cluster
-          SERVICE: mochanai-staging-laravel-php
-          CONTAINER_NAME: laravel-php
-          IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:latest
-          AWS_REGION: ${{ env.AWS_REGION }}
+#######################################
+# 2. Build and Push Laravel Nginx
+#######################################
+- name: Build and Push Laravel Nginx
+  env:
+    ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+    IMAGE_TAG: ${{ github.sha }}
+  run: |
+    ECR_REPO="$ECR_REGISTRY/mochanai-staging-laravel-nginx"
+    docker build --target nginx \
+      -t $ECR_REPO:latest \
+      -t $ECR_REPO:$IMAGE_TAG \
+      -f Dockerfile.app .
+    docker push $ECR_REPO:latest
+    docker push $ECR_REPO:$IMAGE_TAG
 
-      #######################################
-      # 2. Laravel Nginx
-      #######################################
-      - name: Build and Push Laravel Nginx
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-laravel-nginx"
-          docker build --target nginx \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f Dockerfile.app .
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
+#######################################
+# 3. Deploy consolidated app to ECS (Nginx image)
+#######################################
+- name: Deploy Laravel Nginx to ECS (Combined App)
+  uses: ./.github/actions/deploy-to-ecs
+  with:
+    CLUSTER: mochanai-staging-ecs-cluster
+    SERVICE: mochanai-staging-laravel-app    # <-- your new, combined service name!
+    CONTAINER_NAME: laravel-nginx
+    IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:latest
+    AWS_REGION: ${{ env.AWS_REGION }}
 
-      - name: Deploy Laravel Nginx to ECS
-        uses: ./.github/actions/deploy-to-ecs
-        with:
-          CLUSTER: mochanai-staging-ecs-cluster
-          SERVICE: mochanai-staging-laravel-nginx
-          CONTAINER_NAME: laravel-nginx
-          IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:latest
-          AWS_REGION: ${{ env.AWS_REGION }}
+#######################################
+# 4. Deploy consolidated app to ECS (PHP-FPM image)
+#######################################
+- name: Deploy Laravel PHP-FPM to ECS (Combined App)
+  uses: ./.github/actions/deploy-to-ecs
+  with:
+    CLUSTER: mochanai-staging-ecs-cluster
+    SERVICE: mochanai-staging-laravel-app    # <-- must match above!
+    CONTAINER_NAME: laravel-php
+    IMAGE: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:latest
+    AWS_REGION: ${{ env.AWS_REGION }}
 
       #######################################
       # 3. Agentic Orchestrator
