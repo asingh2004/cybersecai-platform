@@ -29,9 +29,9 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      #################################################
+      ###################################################
       # 1. Laravel PHP-FPM
-      #################################################
+      ###################################################
       - name: Build and Push Laravel PHP-FPM
         id: build_push_laravel_php
         env:
