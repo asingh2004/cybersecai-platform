@@ -14,7 +14,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -29,9 +28,38 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      ###################################################
+      # Download all necessary base task defs (download once for each task-def file)
+      - name: Download Laravel App TaskDef
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition mochanai-staging-laravel-app \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' > base-td-laravel-app.json
+
+      - name: Download Agentic App TaskDef
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition mochanai-staging-agentic-app \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' > base-td-agentic-app.json
+
+      - name: Download Databreach App TaskDef
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition mochanai-staging-databreach-app \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' > base-td-databreach-app.json
+
+      - name: Download Privacy Discovery TaskDef
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition mochanai-staging-prod-db-privacy-discovery-service \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition' > base-td-privacy-discovery.json
+
+      #################################################
       # 1. Laravel PHP-FPM
-      ###################################################
+      #################################################
       - name: Build and Push Laravel PHP-FPM
         id: build_push_laravel_php
         env:
@@ -46,32 +74,21 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Laravel App Task Definition (Update PHP)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-laravel-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-laravel-app.json
-
-      - name: Update Laravel PHP-FPM Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:latest" \
-             --arg NAME "laravel-php" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-laravel-app.json > new-td-laravel-app.json
-
-      - name: Register Laravel App Task Definition (PHP)
-        id: register-taskdef-laravel-php
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Laravel PHP)
+        id: render-laravel-php
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-laravel-app.json
+          task-definition: base-td-laravel-app.json
+          container-name: laravel-php
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:latest
 
-      - name: Deploy Laravel App to ECS (PHP)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Laravel PHP)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-laravel-php.outputs.task-definition }}
           service: mochanai-staging-laravel-app
-          task-definition: ${{ steps.register-taskdef-laravel-php.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
       #################################################
       # 2. Laravel Nginx
@@ -90,32 +107,21 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Laravel App Task Definition (Update Nginx)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-laravel-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-laravel-app.json
-
-      - name: Update Laravel Nginx Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:latest" \
-             --arg NAME "laravel-nginx" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-laravel-app.json > new-td-laravel-app.json
-
-      - name: Register Laravel App Task Definition (Nginx)
-        id: register-taskdef-laravel-nginx
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Laravel Nginx)
+        id: render-laravel-nginx
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-laravel-app.json
+          task-definition: base-td-laravel-app.json
+          container-name: laravel-nginx
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:latest
 
-      - name: Deploy Laravel App to ECS (Nginx)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Laravel Nginx)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-laravel-nginx.outputs.task-definition }}
           service: mochanai-staging-laravel-app
-          task-definition: ${{ steps.register-taskdef-laravel-nginx.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
       #################################################
       # 3. Webhook Server
@@ -134,36 +140,25 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Laravel App Task Definition (Update Webhook)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-laravel-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-laravel-app.json
-
-      - name: Update Webhook Server Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-webhook-server:latest" \
-             --arg NAME "webhook_server" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-laravel-app.json > new-td-laravel-app.json
-
-      - name: Register Laravel App Task Definition (Webhook)
-        id: register-taskdef-webhook-server
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Webhook)
+        id: render-webhook
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-laravel-app.json
+          task-definition: base-td-laravel-app.json
+          container-name: webhook_server
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-webhook-server:latest
 
-      - name: Deploy Laravel App to ECS (Webhook)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Webhook)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-webhook.outputs.task-definition }}
           service: mochanai-staging-laravel-app
-          task-definition: ${{ steps.register-taskdef-webhook-server.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
-      ##################################################
-      # PROD Agentic Orchestrator Service
-      ##################################################
+      #################################################
+      # 4. PROD Agentic Orchestrator Service
+      #################################################
       - name: Build and Push PROD Agentic Orchestrator
         id: build_push_prod_agentic_orch
         env:
@@ -178,36 +173,25 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Shared Agentic Task Definition (PROD Orchestrator)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-agentic-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-agentic-app.json
-
-      - name: Update PROD Agentic Orchestrator Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-agentic-orchestrator-service:latest" \
-             --arg NAME "prod_agentic_orchestrator_service" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-agentic-app.json > new-td-agentic-app.json
-
-      - name: Register Shared Agentic Task Definition (PROD Orchestrator)
-        id: register-taskdef-prod-agentic-orchestrator
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (PROD Agentic Orchestrator)
+        id: render-prod-agentic-orchestrator
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-agentic-app.json
+          task-definition: base-td-agentic-app.json
+          container-name: prod_agentic_orchestrator_service
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-agentic-orchestrator-service:latest
 
-      - name: Deploy Agentic Shared App to ECS (PROD Orchestrator)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (PROD Agentic Orchestrator)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-prod-agentic-orchestrator.outputs.task-definition }}
           service: mochanai-staging-agentic-app
-          task-definition: ${{ steps.register-taskdef-prod-agentic-orchestrator.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
-      ##################################################
-      # Agentic Orchestrator (non-prod)
-      ##################################################
+      #################################################
+      # 5. Agentic Orchestrator (non-prod)
+      #################################################
       - name: Build and Push Agentic Orchestrator
         id: build_push_agentic_orch
         env:
@@ -222,36 +206,25 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Shared Agentic Task Definition (Orchestrator)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-agentic-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-agentic-app.json
-
-      - name: Update Agentic Orchestrator Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-orchestrator-service:latest" \
-             --arg NAME "agentic_orchestrator_service" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-agentic-app.json > new-td-agentic-app.json
-
-      - name: Register Shared Agentic Task Definition (Orchestrator)
-        id: register-taskdef-agentic-orchestrator
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Agentic Orchestrator)
+        id: render-agentic-orchestrator
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-agentic-app.json
+          task-definition: base-td-agentic-app.json
+          container-name: agentic_orchestrator_service
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-orchestrator-service:latest
 
-      - name: Deploy Agentic Shared App to ECS (Orchestrator)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Agentic Orchestrator)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-agentic-orchestrator.outputs.task-definition }}
           service: mochanai-staging-agentic-app
-          task-definition: ${{ steps.register-taskdef-agentic-orchestrator.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
-      ##################################################
-      # Agentic Service
-      ##################################################
+      #################################################
+      # 6. Agentic Service
+      #################################################
       - name: Build and Push Agentic Service
         id: build_push_agentic
         env:
@@ -266,36 +239,25 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Shared Agentic Task Definition (Service)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-agentic-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-agentic-app.json
-
-      - name: Update Agentic Service Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-service:latest" \
-             --arg NAME "agentic_service" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-agentic-app.json > new-td-agentic-app.json
-
-      - name: Register Shared Agentic Task Definition (Service)
-        id: register-taskdef-agentic-service
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Agentic Service)
+        id: render-agentic-service
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-agentic-app.json
+          task-definition: base-td-agentic-app.json
+          container-name: agentic_service
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-service:latest
 
-      - name: Deploy Agentic Shared App to ECS (Service)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Agentic Service)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-agentic-service.outputs.task-definition }}
           service: mochanai-staging-agentic-app
-          task-definition: ${{ steps.register-taskdef-agentic-service.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
-      ##################################################
-      # Databreach Event Advisor
-      ##################################################
+      #################################################
+      # 7. Databreach Event Advisor
+      #################################################
       - name: Build and Push Databreach Event Advisor
         id: build_push_db_event_advisor
         env:
@@ -310,36 +272,25 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Shared Databreach Task Definition (Event Advisor)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-databreach-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-databreach-app.json
-
-      - name: Update Event Advisor Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-event-advisor:latest" \
-             --arg NAME "databreach_event_advisor" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-databreach-app.json > new-td-databreach-app.json
-
-      - name: Register Shared Databreach Task Definition (Event Advisor)
-        id: register-taskdef-db-event-advisor
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Databreach Event Advisor)
+        id: render-db-event-advisor
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-databreach-app.json
+          task-definition: base-td-databreach-app.json
+          container-name: databreach_event_advisor
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-event-advisor:latest
 
-      - name: Deploy Databreach Shared App to ECS (Event Advisor)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Databreach Event Advisor)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-db-event-advisor.outputs.task-definition }}
           service: mochanai-staging-databreach-app
-          task-definition: ${{ steps.register-taskdef-db-event-advisor.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
-      ##################################################
-      # Databreach Step 1
-      ##################################################
+      #################################################
+      # 8. Databreach Step 1
+      #################################################
       - name: Build and Push Databreach Step 1
         id: build_push_db_step1
         env:
@@ -354,36 +305,25 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Shared Databreach Task Definition (Step 1)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-databreach-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-databreach-app.json
-
-      - name: Update Step 1 Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step1:latest" \
-             --arg NAME "databreach_step1" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-databreach-app.json > new-td-databreach-app.json
-
-      - name: Register Shared Databreach Task Definition (Step 1)
-        id: register-taskdef-db-step1
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Databreach Step 1)
+        id: render-db-step1
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-databreach-app.json
+          task-definition: base-td-databreach-app.json
+          container-name: databreach_step1
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step1:latest
 
-      - name: Deploy Databreach Shared App to ECS (Step 1)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Databreach Step 1)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-db-step1.outputs.task-definition }}
           service: mochanai-staging-databreach-app
-          task-definition: ${{ steps.register-taskdef-db-step1.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
-      ##################################################
-      # Databreach Step 2
-      ##################################################
+      #################################################
+      # 9. Databreach Step 2
+      #################################################
       - name: Build and Push Databreach Step 2
         id: build_push_db_step2
         env:
@@ -398,36 +338,25 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Shared Databreach Task Definition (Step 2)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-databreach-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-databreach-app.json
-
-      - name: Update Step 2 Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step2:latest" \
-             --arg NAME "databreach_step2" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-databreach-app.json > new-td-databreach-app.json
-
-      - name: Register Shared Databreach Task Definition (Step 2)
-        id: register-taskdef-db-step2
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Databreach Step 2)
+        id: render-db-step2
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-databreach-app.json
+          task-definition: base-td-databreach-app.json
+          container-name: databreach_step2
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step2:latest
 
-      - name: Deploy Databreach Shared App to ECS (Step 2)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Databreach Step 2)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-db-step2.outputs.task-definition }}
           service: mochanai-staging-databreach-app
-          task-definition: ${{ steps.register-taskdef-db-step2.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
-      ##################################################
-      # Databreach Step 3
-      ##################################################
+      #################################################
+      # 10. Databreach Step 3
+      #################################################
       - name: Build and Push Databreach Step 3
         id: build_push_db_step3
         env:
@@ -442,35 +371,24 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download Shared Databreach Task Definition (Step 3)
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-databreach-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-databreach-app.json
-
-      - name: Update Step 3 Image in Task Definition
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step3:latest" \
-             --arg NAME "databreach_step3" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-databreach-app.json > new-td-databreach-app.json
-
-      - name: Register Shared Databreach Task Definition (Step 3)
-        id: register-taskdef-db-step3
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Databreach Step 3)
+        id: render-db-step3
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-databreach-app.json
+          task-definition: base-td-databreach-app.json
+          container-name: databreach_step3
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step3:latest
 
-      - name: Deploy Databreach Shared App to ECS (Step 3)
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Databreach Step 3)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-db-step3.outputs.task-definition }}
           service: mochanai-staging-databreach-app
-          task-definition: ${{ steps.register-taskdef-db-step3.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
 
       #################################################
-      # 10. PROD DB Privacy Discovery Service
+      # 11. PROD DB Privacy Discovery Service
       #################################################
       - name: Build and Push PROD DB Privacy Discovery Service
         id: build_push_prod_db_privacy
@@ -486,29 +404,18 @@ jobs:
           docker push $ECR_REPO:latest
           docker push $ECR_REPO:$IMAGE_TAG
 
-      - name: Download PROD DB Privacy Discovery Task Definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-prod-db-privacy-discovery-service \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > td-prod-db-privacy-discovery.json
-
-      - name: Update PROD DB Privacy Discovery Image
-        run: |
-          jq --arg IMAGE "${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-db-privacy-discovery-service:latest" \
-             --arg NAME "prod_db_privacy_discovery_service" \
-             '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-             td-prod-db-privacy-discovery.json > new-td-prod-db-privacy-discovery.json
-
-      - name: Register PROD DB Privacy Discovery Task Definition
-        id: register-taskdef-prod-db-privacy-discovery
-        uses: aws-actions/amazon-ecs-register-task-definition@v1
+      - name: Render TaskDef (Privacy Discovery)
+        id: render-privacy-discovery
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: new-td-prod-db-privacy-discovery.json
+          task-definition: base-td-privacy-discovery.json
+          container-name: prod_db_privacy_discovery_service
+          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-db-privacy-discovery-service:latest
 
-      - name: Deploy PROD DB Privacy Discovery Service to ECS
-        uses: aws-actions/amazon-ecs-update-service@v1
+      - name: Deploy Service (Privacy Discovery)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          cluster: mochanai-staging-ecs-cluster
+          task-definition: ${{ steps.render-privacy-discovery.outputs.task-definition }}
           service: mochanai-staging-prod-db-privacy-discovery-service
-          task-definition: ${{ steps.register-taskdef-prod-db-privacy-discovery.outputs.task-definition-arn }}
+          cluster: mochanai-staging-ecs-cluster
+          wait-for-service-stability: true
