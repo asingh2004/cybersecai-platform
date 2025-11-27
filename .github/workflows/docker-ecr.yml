@@ -161,7 +161,6 @@ jobs:
           service: mochanai-staging-laravel-app
           task-definition: ${{ steps.register-taskdef-webhook-server.outputs.task-definition-arn }}
 
-      
       ##################################################
       # PROD Agentic Orchestrator Service
       ##################################################
@@ -470,8 +469,6 @@ jobs:
           service: mochanai-staging-databreach-app
           task-definition: ${{ steps.register-taskdef-db-step3.outputs.task-definition-arn }}
 
-     
-
       #################################################
       # 10. PROD DB Privacy Discovery Service
       #################################################
@@ -515,5 +512,3 @@ jobs:
           cluster: mochanai-staging-ecs-cluster
           service: mochanai-staging-prod-db-privacy-discovery-service
           task-definition: ${{ steps.register-taskdef-prod-db-privacy-discovery.outputs.task-definition-arn }}
-
-     
