@@ -1,4 +1,6 @@
 # Put this file on your server at /etc/systemd/system/databreach_step3.service
+#sudo lsof -i :8302
+# sudo systemctl restart databreach_step3
 
 #sudo systemctl daemon-reload
 #sudo systemctl enable databreach_step3

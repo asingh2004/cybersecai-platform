@@ -34,6 +34,7 @@ use App\Http\Controllers\AgenticAI\{
     DataBreachController,
     AiComplianceBotController,
     Compliance\EventController,
+  	Compliance\DataBreachAdvisorController,
     DocsGeneratorController,
     AgentListController
 };
@@ -69,32 +70,43 @@ Route::view('/about', 'about')->name('about');
 
 
 //=================
-// 3. Authenticated Groups
+// 3. Authenticated Groups//=================
+// All Wizard/Auth routes combined and fixed
 //=================
 Route::middleware(['auth'])->group(function () {
-    // Wizard and Persona routes
+    // Essential Setup routes
+    Route::get('/wizard/essential-setup', [WizardController::class, 'essentialSetup'])->name('wizard.essentialSetup');
+    Route::post('/wizard/essential-setup/section1/save', [WizardController::class, 'essentialSetupSection1Save'])->name('wizard.essentialSetup.section1.save');
+    Route::post('/wizard/essential-setup/section2/save', [WizardController::class, 'essentialSetupSection2Save'])->name('wizard.essentialSetup.section2.save');
+    Route::post('/wizard/essential-setup/section3/recommend', [WizardController::class, 'essentialSetupSection3Recommend'])->name('wizard.essentialSetup.section3.recommend');
+    Route::post('/wizard/essential-setup/section3/save', [WizardController::class, 'essentialSetupSection3Save'])->name('wizard.essentialSetup.section3.save');
+	Route::post('/wizard/essential-setup/section4/recommend', [WizardController::class, 'essentialSetupSection4Recommend'])->name('wizard.essentialSetup.section4.recommend');
+	Route::post('/wizard/essential-setup/section4/save',       [WizardController::class, 'essentialSetupSection4Save'])->name('wizard.essentialSetup.section4.save');
+  
+  	Route::get('/wizard/setup-data-source', [WizardController::class, 'setupDataSource'])->name('wizard.setup_data_source');
+  
+    // Wizard and Persona routes using controller group shorthand
     Route::controller(WizardController::class)->group(function () {
-        Route::get('/wizard/step1',       'step1')->name('wizard.step1');
-        Route::post('/wizard/step1',      'step1Post')->name('wizard.step1.post');
-        Route::get('/wizard/step2',       'step2')->name('wizard.step2');
-        Route::post('/wizard/step2',      'step2Post')->name('wizard.step2.post');
-        Route::get('/wizard/step3',       'step3')->name('wizard.step3');
-        Route::post('/wizard/step3',      'step3Post')->name('wizard.step3.post');
-        Route::get('/wizard/step4',       'step4')->name('wizard.step4');
-        Route::post('/wizard/step4',      'step4Post')->name('wizard.step4.post');
-      	Route::match(['get', 'post'], '/wizard/privacy-regulations', 'privacyRegulations')->name('wizard.privacyRegulations');
-      	Route::match(['get', 'post'], '/wizard/subject-categories', 'subjectCategories')->name('wizard.subjectCategories');	
-      	Route::get('/wizard/step5',       'step5')->name('wizard.step5');
-        Route::post('/wizard/step5',      'step5Post')->name('wizard.step5.post');
-        Route::get('/wizard/done',        'done')->name('wizard.done');
-        Route::get('/wizdashboard',       'dashboard')->name('wizard.dashboard');
-        Route::get('/config/{id}',        'show')->name('wizard.show');
-        Route::get('/config/{id}/edit',   'edit')->name('wizard.edit');
-        Route::delete('/config/{id}',     'destroy')->name('wizard.destroy');
-        Route::get('/persona/auditor',    'auditorPersonaDashboard')->name('persona.audit.dashboard');
-        Route::get('/persona/risk',       'riskPersonaDashboard')->name('persona.risk.dashboard');
+        Route::get('/wizard/step1', 'step1')->name('wizard.step1');
+        Route::post('/wizard/step1', 'step1Post')->name('wizard.step1.post');
+        Route::get('/wizard/step2', 'step2')->name('wizard.step2');
+        Route::post('/wizard/step2', 'step2Post')->name('wizard.step2.post');
+        Route::get('/wizard/step3', 'step3')->name('wizard.step3');
+        Route::post('/wizard/step3', 'step3Post')->name('wizard.step3.post');
+        Route::get('/wizard/step4', 'step4')->name('wizard.step4');
+        Route::post('/wizard/step4', 'step4Post')->name('wizard.step4.post');
+
+        Route::get('/wizard/step5', 'step5')->name('wizard.step5');
+        Route::post('/wizard/step5', 'step5Post')->name('wizard.step5.post');
+        Route::get('/wizard/done', 'done')->name('wizard.done');
+        Route::get('/wizdashboard', 'dashboard')->name('wizard.dashboard');
+        Route::get('/config/{id}', 'show')->name('wizard.show');
+        Route::get('/config/{id}/edit', 'edit')->name('wizard.edit');
+        Route::delete('/config/{id}', 'destroy')->name('wizard.destroy');
+        Route::get('/persona/auditor', 'auditorPersonaDashboard')->name('persona.audit.dashboard');
+        Route::get('/persona/risk', 'riskPersonaDashboard')->name('persona.risk.dashboard');
         Route::get('/persona/cybersecurity', 'cyberPersonaDashboard')->name('persona.cyber.dashboard');
-        Route::get('/persona/dashboard',  'personaComplianceDashboard')->name('persona.dashboard');
+        Route::get('/persona/dashboard', 'personaComplianceDashboard')->name('persona.dashboard');
         Route::get('/persona/file/{hash}/{fileName}', 'personaFileDetail')->name('persona.file_detail');
         // Add POST routes for classify/start
         Route::post('/wizard/classify-files-m365/{config_id}', 'classifyFilesM365');
@@ -102,7 +114,6 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/wizard/classify-files-nfs/{config_id}', 'classifyFilesNFS');
         Route::post('/wizard/classify-files-s3/{config_id}', 'classifyFilesS3');
         Route::post('/wizard/classify-database/{config_id}', 'classifyDatabase')->name('wizard.classify-database');
-        //Route::post('/wizard/classify-database/{config_id}', [WizardController::class, 'classifyDatabase'])->name('wizard.classify-database');
         Route::post('/wizard/classify-files-gdrive/{config_id}', 'classifyFilesGDrive');
         Route::post('/wizard/start-classifying/{config_id}', 'startClassifying')->name('wizard.start_classifying');
         Route::post('/wizard/start-classifying-smb/{config_id}', 'startClassifyingSMB');
@@ -110,29 +121,15 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/wizard/start-classifying-s3/{config_id}', 'startClassifyingS3');
         Route::post('/wizard/start-classifying-gdrive/{config_id}', 'startClassifyingGDrive');
         Route::post('/wizard/start', 'startWizard')->name('wizard.start');
-        //Route::get('/wizard/filesummary_pyramid', 'fileSummaryPyramid')->name('wizard.filesummary_pyramid');
         Route::get('/wizard/visuals-dashboard', fn () => view('wizard.visuals_dashboard'))->name('wizard.visuals_dashboard');
-        //Route::get('/wizard/file-graph/network', 'fileGraphNetwork')->name('wizard.file_graph_network');
-        //Route::get('/wizard/file-graph/table', 'fileGraphTable')->name('wizard.file_graph_table');
-        Route::post('/wizard/establish-m365-link/{config_id}', 'establishM365Link')->name('wizard.establish_m365_link');
-        
-      
-        //Route::get('/wizard/filesummary_pyramid', 'fileSummaryPyramid')->name('wizard.filesummary_pyramid');
-        //Route::get('/wizard/file-graph/table', 'fileGraphTable')->name('wizard.file_graph_table');
-      
-        Route::get('/wizard/filesummary_pyramid', 'WizardController@fileSummaryPyramid')->name('wizard.filesummary_pyramid');
-        Route::get('/wizard/file-graph/table', 'WizardController@fileGraphTable')->name('wizard.file_graph_table');
-        Route::get('/wizard/file-graph/network', 'WizardController@fileGraphNetwork')->name('wizard.file_graph_network');
-        Route::get('/api/pyramid-stats', 'WizardController@apiPyramidStats')->name('api.pyramid_stats');
-        Route::get('/api/files-table', 'WizardController@apiFilesTable')->name('api.files_table');
+
+        Route::get('/wizard/filesummary_pyramid', 'fileSummaryPyramid')->name('wizard.filesummary_pyramid');
+        Route::get('/wizard/file-graph/table', 'fileGraphTable')->name('wizard.file_graph_table');
+        Route::get('/wizard/file-graph/network', 'fileGraphNetwork')->name('wizard.file_graph_network');
+        Route::get('/api/pyramid-stats', 'apiPyramidStats')->name('api.pyramid_stats');
+        Route::get('/api/files-table', 'apiFilesTable')->name('api.files_table');
     });
 
-  //Route::get('/wizard/filesummary_pyramid', [WizardController::class, 'fileSummaryPyramid'])
-    // ->name('wizard.filesummary_pyramid');
-  
-    //Route::get('/wizard/file-graph/table', [WizardController::class, 'fileGraphTable'])
-    // ->name('wizard.file_graph_table');
-  
     // Cybersec Visuals
     Route::get('/cybersecai-visuals', [CybersecVisualsController::class, 'index']);
     Route::get('/cybersecai-visuals/api/filedata', [CybersecVisualsController::class, 'apiFileData']);
@@ -154,6 +151,10 @@ Route::middleware(['auth'])->group(function () {
         Route::post('{id}/sample', [CybersecSIEMController::class, 'sample'])->name('cybersecai_siem.sample');
         Route::post('{id}/test', [CybersecSIEMController::class, 'test'])->name('cybersecai_siem.test');
     });
+  
+  	Route::get('/agentic-ai/compliance/breach', [DataBreachAdvisorController::class, 'index'])->name('agentic_ai.compliance.breach.index');
+	Route::post('/agentic-ai/compliance/breach/run', [DataBreachAdvisorController::class, 'analyze'])->name('agentic_ai.compliance.breach.run');
+
     // Agentic AI
     Route::prefix('agentic_ai')->group(function () {
         Route::get('/auditor', [InternalAuditorController::class, 'index'])->name('agentic_ai.auditor');
@@ -172,47 +173,38 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/agenticai/docs/json_download/{user_id}/{filename}', [DocsGeneratorController::class, 'jsonDownload'])->where('filename', '.*')->name('agenticai.docs.json_download');
     Route::get('/agenticai/docs/docx_download/{user_id}/{filename}', [DocsGeneratorController::class, 'docxDownload'])->where('filename', '.*')->name('agenticai.docs.docx_download');
     Route::post('/agenticai/docs_agent/delete', [DocsGeneratorController::class, 'deleteDocument'])->name('agenticai.docs_agent.delete');
-});
 
-
-Route::middleware(['auth'])->group(function() {
+    // Chatbot and Chat Orchestrator
     Route::get('/agentic-ai/chatbot', [\App\Http\Controllers\AgenticAI\CybersecChatbotController::class, 'index'])->name('agentic.chatbot');
     Route::post('/agentic-ai/chatbot', [\App\Http\Controllers\AgenticAI\CybersecChatbotController::class, 'chat'])->name('agentic.chatbot.post');
-});
 
-Route::middleware(['auth'])->group(function() {
-Route::get('/agentic-ai/chatorchestrator', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'view'])->name('chatorchestrator.view');
-Route::post('/agentic-ai/chatorchestrator/post', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'orchestrate'])->name('chatorchestrator.orchestrate');
-Route::get('/download_csv', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'downloadCsv'])
-    ->name('download_csv');
-  
-  Route::get('/download_docx', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'downloadDocx'])
-    ->name('download_docx');
+    Route::get('/agentic-ai/chatorchestrator', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'view'])->name('chatorchestrator.view');
+    Route::post('/agentic-ai/chatorchestrator/post', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'orchestrate'])->name('chatorchestrator.orchestrate');
+    Route::get('/download_csv', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'downloadCsv'])
+        ->name('download_csv');
+    Route::get('/download_docx', [\App\Http\Controllers\AgenticAI\ChatOrchestratorController::class, 'downloadDocx'])
+        ->name('download_docx');
 
-});
+    // Chat Bootstrap (single route with middleware)
+    Route::get('/chat/bootstrap', [\App\Http\Controllers\ChatWidgetController::class, 'bootstrap'])
+        ->name('chatorchestrator.bootstrap');
 
-Route::get('/chat/bootstrap', [\App\Http\Controllers\ChatWidgetController::class, 'bootstrap'])
-    ->name('chatorchestrator.bootstrap')
-    ->middleware('auth');
-
-//Visuals Graphs etc...
-Route::middleware(['auth'])->prefix('wizard')->name('wizard.')->group(function () {
-// Existing pages
-Route::get('/', [FileSummariser::class, 'index'])->name('index');
-Route::get('/filesummary/pyramid', [FileSummariser::class, 'riskPyramid'])->name('filesummary_pyramid');
-Route::get('/file-table', [FileSummariser::class, 'table'])->name('file_graph_table');
-Route::get('/files', [FileSummariser::class, 'filesList'])->name('files.list');
-Route::get('/file/{file}', [FileSummariser::class, 'fileDetail'])->name('file.show');
-
-// New chart pages
-Route::get('/filesummary/treemap', [FileSummariser::class, 'treemap'])->name('filesummary_treemap');
-Route::get('/filesummary/sunburst', [FileSummariser::class, 'sunburst'])->name('filesummary_sunburst');
-Route::get('/filesummary/stacked-bar', [FileSummariser::class, 'stackedBar'])->name('filesummary_stacked_bar');
-Route::get('/filesummary/heatmap', [FileSummariser::class, 'heatmap'])->name('filesummary_heatmap');
-Route::get('/filesummary/bubble', [FileSummariser::class, 'bubble'])->name('filesummary_bubble');
-Route::get('/filesummary/sankey', [FileSummariser::class, 'sankey'])->name('filesummary_sankey');
-
-
+    // Visuals Graphs etc...
+    Route::prefix('wizard')->name('wizard.')->group(function () {
+        // Existing pages
+        Route::get('/', [FileSummariser::class, 'index'])->name('index');
+        Route::get('/filesummary/pyramid', [FileSummariser::class, 'riskPyramid'])->name('filesummary_pyramid');
+        Route::get('/file-table', [FileSummariser::class, 'table'])->name('file_graph_table');
+        Route::get('/files', [FileSummariser::class, 'filesList'])->name('files.list');
+        Route::get('/file/{file}', [FileSummariser::class, 'fileDetail'])->name('file.show');
+        // New chart pages
+        Route::get('/filesummary/treemap', [FileSummariser::class, 'treemap'])->name('filesummary_treemap');
+        Route::get('/filesummary/sunburst', [FileSummariser::class, 'sunburst'])->name('filesummary_sunburst');
+        Route::get('/filesummary/stacked-bar', [FileSummariser::class, 'stackedBar'])->name('filesummary_stacked_bar');
+        Route::get('/filesummary/heatmap', [FileSummariser::class, 'heatmap'])->name('filesummary_heatmap');
+        Route::get('/filesummary/bubble', [FileSummariser::class, 'bubble'])->name('filesummary_bubble');
+        Route::get('/filesummary/sankey', [FileSummariser::class, 'sankey'])->name('filesummary_sankey');
+    });
 });
 
 Route::middleware(['auth'])->group(function () {

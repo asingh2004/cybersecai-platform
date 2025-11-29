@@ -1,5 +1,8 @@
 # Put this file on your server at /etc/systemd/system/databreach_step2.service
 
+#sudo lsof -i :8301
+# sudo systemctl restart databreach_step2
+
 #sudo systemctl daemon-reload
 #sudo systemctl enable databreach_step2
 #sudo systemctl start databreach_step2

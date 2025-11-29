@@ -21,7 +21,10 @@
         "maatwebsite/excel": "^3.1",
         "niklasravnsborg/laravel-pdf": "^4.0",
         "phpmailer/phpmailer": "^6.6",
+        "phpoffice/phpword": "^1.4",
+        "smalot/pdfparser": "^2.12",
         "spatie/laravel-permission": "^5.11",
+        "spatie/pdf-to-text": "^1.54",
         "twilio/sdk": "^6.44",
         "yajra/laravel-datatables-buttons": "^4.13",
         "yajra/laravel-datatables-oracle": "^9.0"

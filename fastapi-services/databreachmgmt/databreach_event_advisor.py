@@ -1,207 +1,228 @@
 
 #/home/cybersecai/htdocs/www.cybersecai.io/webhook/venv/bin/gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8303 databreach_event_advisor:app
 #sudo systemctl restart databreach_event_advisor
+#sudo lsof -i :8303
 
-import openai, os, json, re
+import os
+import json
+import re
+from typing import List, Optional, Dict, Any
+
+import openai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI()
+client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-class AgentReq(BaseModel):
-    standard: str
-    jurisdiction: str
-    requirement_notes: str
-    event_type: str
-    data: dict
 
-def markdown_compliance_reply(results: dict) -> str:
+class BreachReq(BaseModel):
+    business_id: str
+    user_id: Optional[int] = None
+    event_title: str
+    incident_text: str
+    selected_regulations: List[Dict[str, Any]]
+    evidence_meta: Optional[Dict[str, Any]] = None
+
+
+def _format_regulations(regs: List[Dict[str, Any]]) -> str:
+    if not regs:
+        return "None supplied."
     lines = []
-    # 1. Risk Section
-    risk = results.get('risk', '') or ''
-    if risk:
-        lines.append(f"### 🛡️ Privacy Risk Score: **{risk}**")
-    if results.get('decision_reason'):
-        lines.append(f"> _Reasoning:_ {results['decision_reason']}")
-
-    # 2. Next Steps
-    actions = results.get('action', [])
-    if isinstance(actions, str):
-        actions = [x.strip() for x in actions.split(',') if x.strip()]
-    if actions:
-        lines.append("\n### ✨ Recommended Next Steps\n")
-        for act in actions:
-            lines.append(f"- {act}")
-
-    # 3. Draft Documents for actions
-    # Canonical action fields
-    doc_fields = [
-        ('internal_report', 'Internal Report for Management'),
-        ('authority_notification_letter', 'Authority Notification Letter'),
-        ('data_subject_notification', 'Data Subject Notification'),
-        ('public_statement', 'Public Statement/FAQ'),
-    ]
-    # Add any additional action fields present in result, that aren't above
-    for k in results.keys():
-        if k.endswith('_letter') or k.endswith('_notification') or k.endswith('_report') or k == 'public_statement':
-            if k not in dict(doc_fields):
-                label = k.replace('_', ' ').title()
-                doc_fields.append((k, label))
-
-    has_docs = False
-    for key, label in doc_fields:
-        text = results.get(key, '')
-        if text:
-            has_docs = True
-            lines.append(f"\n#### {label}\n{text.strip()}")
-
-    if not has_docs:
-        lines.append("\n_No drafts required for this scenario._\n")
-
-    # 4. Legal/Ethical Reasoning
-    if results.get("decision_reason"):
-        lines.append("\n---\n> _Legal/Ethical Reasoning:_ " + results['decision_reason'])
-
-    # 5. Table of all fields (excluding big draft bodies, show "[See Above]")
-    lines.append("\n---\n### Output Summary Table\n")
-    lines.append("| Field | Value |")
-    lines.append("|-------|-------|")
-    for k, v in results.items():
-        if k in dict(doc_fields) and v and len(str(v)) > 120:
-            valstr = "[See Above]"
-        elif isinstance(v, list):
-            valstr = ', '.join(map(str, v))
-        else:
-            valstr = v
-        lines.append(f"| `{k}` | {valstr} |")
-
+    for reg in regs:
+        fields = ', '.join(reg.get('fields', []) or [])
+        lines.append(f"- {reg.get('standard','(unknown)')} ({reg.get('jurisdiction','N/A')}) :: {fields}")
     return "\n".join(lines)
 
-def dynamic_agent(req: AgentReq):
-    # ESCAPE inner triple-backticks by using quadruple-backticks in the prompt!
+
+def _build_markdown(payload: Dict[str, Any]) -> str:
+    assessment = payload.get("assessment", {})
+    steps = payload.get("process_steps", [])
+    determination = payload.get("determination", {})
+    citations = payload.get("citations", [])
+    cyber = payload.get("cyber_security_summary", {})
+
+    lines = []
+    lines.append("## Incident Assessment Summary")
+    lines.append(f"**Risk Rating:** {assessment.get('risk_rating', 'N/A')} ({assessment.get('confidence','n/a')} confidence)")
+    lines.append(f"**Summary:** {assessment.get('summary','')}")
+    if assessment.get("key_findings"):
+        lines.append("\n**Key Findings:**")
+        for item in assessment["key_findings"]:
+            lines.append(f"- {item}")
+    if assessment.get("exposed_data"):
+        lines.append("\n**Impacted Data:** " + ", ".join(assessment["exposed_data"]))
+    if assessment.get("timeline"):
+        lines.append(f"**Timeline:** {assessment['timeline']}")
+
+    if steps:
+        lines.append("\n## Data Breach Process")
+        for step in steps:
+            lines.append(f"### Step {step.get('step_number','')} · {step.get('title','')}")
+            lines.append(f"_Status:_ {step.get('status','')}")
+            if step.get("tagline"):
+                lines.append(f"_Target:_ {step['tagline']}")
+            lines.append(step.get("details",""))
+            if step.get("communication_focus"):
+                lines.append(f"_Focus:_ {step['communication_focus']}")
+            if step.get("notification_template"):
+                lines.append("\n> **Notification Draft:**\n>\n> " + step["notification_template"].replace("\n", "\n> "))
+            if step.get("not_applicable_reason"):
+                lines.append(f"> Not applicable because: {step['not_applicable_reason']}")
+
+    lines.append("\n## Determination")
+    notifiable = "YES" if determination.get("is_notifiable") else "NO"
+    lines.append(f"- **Notifiable:** {notifiable}")
+    lines.append(f"- **Summary:** {determination.get('determination_summary','')}")
+    if determination.get("evidence"):
+        lines.append("**Evidence:**")
+        for ev in determination["evidence"]:
+            lines.append(f"- {ev}")
+    if determination.get("final_recommendation"):
+        lines.append(f"**Recommendation:** {determination['final_recommendation']}")
+
+    if cyber:
+        lines.append("\n## Cybersecurity Synopsis")
+        lines.append(f"- **Headline:** {cyber.get('headline','')}")
+        if cyber.get("attack_vector"):
+            lines.append(f"- **Attack vector:** {cyber['attack_vector']}")
+        if cyber.get("threat_actor_assessment"):
+            lines.append(f"- **Threat actor:** {cyber['threat_actor_assessment']}")
+        if cyber.get("residual_risk"):
+            lines.append(f"- **Residual risk:** {cyber['residual_risk']}")
+        tasks = cyber.get("containment_priority") or []
+        if tasks:
+            lines.append("**Containment priorities:**")
+            for task in tasks:
+                lines.append(f"- {task}")
+
+    if citations:
+        lines.append("\n## Citations")
+        for cite in citations:
+            clauses = ", ".join(cite.get("clauses", []))
+            lines.append(f"- **{cite.get('regulation','')}**: {clauses} – {cite.get('reason','')}")
+
+    return "\n".join(lines).strip()
+
+
+def _parse_model_json(text: str) -> Dict[str, Any]:
+    block = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
+    json_str = block.group(1) if block else text[text.find("{"):]
+    try:
+        return json.loads(json_str)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unable to parse model JSON: {exc}")
+
+
+def generate_breach_plan(req: BreachReq) -> Dict[str, Any]:
+    regulations = _format_regulations(req.selected_regulations)
     prompt = f"""
-You are acting as a world-class privacy/compliance officer specializing in {req.standard} for {req.jurisdiction}.
+You are a senior Data Breach & Privacy Counsel backed by a cyber incident responder.
+Take a realistic, evidence-based approach—do NOT label every incident as reportable.
+Only escalate to a notifiable breach when legal thresholds (e.g., likely serious harm, statutory reporting conditions) are genuinely met.
 
-Jurisdictional notes for your decision:
-{req.requirement_notes}
+Regulations tied to the business:
+{regulations}
 
-Event to analyze:
-- {req.event_type}
-- File/Data: {json.dumps(req.data, ensure_ascii=False)}
+Incident to assess:
+Title: {req.event_title}
+Details:
+{req.incident_text}
 
-**Your answer must use professional English, CLEAR headings, numbered steps, and Markdown formatting, with bold, italics, and call-out blocks as appropriate.**
+Respond ONLY with a single ```json block using this schema:
 
-**Instructions:**
-1. Analyze the event and input data. Always identify *true* risk drivers; never invent missing details.
-2. **Step 1:** Score the privacy risk (**LOW**, **MEDIUM**, or **HIGH**) with a one-sentence justification.
-3. **Step 2:** Explicitly recommend all next steps (as a bulleted list) as relevant for this scenario, such as any or all of:
-    - `internal_report`
-    - `notify_authority`
-    - `communicate_subjects`
-    - `public_communication`
-    - …and any other mandatory next steps.
-4. **Step 3:** For **each** required action in Step 2:
-    - **internal_report**: If required, generate a complete internal summary report for management (otherwise leave empty).
-    - **notify_authority**: If required, generate a draft notification letter that fully meets regulator requirements (otherwise leave empty).
-    - **communicate_subjects**: If required, draft a clear notification for affected data subjects (otherwise leave empty).
-    - **public_communication**: If required, draft a concise public statement/FAQ (otherwise leave empty).
-    - For any other required action, provide briefly what should be communicated/documented.
-5. **Step 4:** Provide your full reasoning for these choices.
-6. **Step 5:** At the very end, output minimized JSON (no extra explanation!) in a code block, with keys:
-    - `risk`
-    - `action` (list)
-    - `decision_reason`
-    - `internal_report`
-    - `authority_notification_letter`
-    - `data_subject_notification`
-    - `public_statement`
-    - ...as many action fields as needed (set unused ones as `""`).
-
-**EXPLICIT OUTPUT FORMAT:**
----------------------------
-### 🛡️ Risk Score
-- **Risk:** LOW/MEDIUM/HIGH
-- **Reason:** ...
-
-### ✨ Recommended Next Steps
-- internal_report
-- notify_authority
-- communicate_subjects
-- ...
-
-### 📄 Draft Documents
-
-#### Internal Report
-(text, if required; else "not required" or leave blank)
-
-#### Authority Notification Letter
-(text, if required; else blank)
-
-#### Data Subject Notification
-(text, if required; else blank)
-
-#### Public Communication / Statement
-(text, if required; else blank)
-
----
-
-> _Legal/Ethical Reasoning:_  
-(your reasoning here)
-
----
-
-At the end, output this JSON in a code block; keys for unused actions should be present with an empty string:
-
-```json
 {{
-  "risk": "HIGH",
-  "action": ["internal_report","notify_authority","communicate_subjects"],
-  "decision_reason": "...",
-  "internal_report": "...",
-  "authority_notification_letter": "...",
-  "data_subject_notification": "...",
-  "public_statement": ""
+  "assessment": {{
+    "risk_rating": "LOW|MEDIUM|HIGH",
+    "summary": "",
+    "key_findings": [],
+    "exposed_data": [],
+    "impact_scope": [],
+    "timeline": "",
+    "confidence": "High|Medium|Low"
+  }},
+  "process_steps": [
+    {{
+      "step_number": 1,
+      "title": "",
+      "status": "required|optional|not_applicable",
+      "tagline": "",
+      "details": "",
+      "communication_focus": "",
+      "notification_template": "",
+      "reference_regulation": "",
+      "reference_clause": "",
+      "not_applicable_reason": ""
+    }}
+  ],
+  "determination": {{
+    "is_notifiable": true,
+    "determination_summary": "",
+    "evidence": [],
+    "final_recommendation": "",
+    "authority_notifications": [
+      {{"authority":"", "deadline":"", "rationale":""}}
+    ],
+    "subject_notifications": [
+      {{"audience":"", "deadline":"", "message":""}}
+    ],
+    "containment_actions": [
+      "..."
+    ]
+  }},
+  "citations": [
+    {{"regulation":"", "clauses":[""], "reason":""}}
+  ],
+  "cyber_security_summary": {{
+    "headline": "",
+    "attack_vector": "",
+    "threat_actor_assessment": "",
+    "containment_priority": [],
+    "residual_risk": ""
+  }}
 }}
 
+Rules:
+- Process steps must follow detect/contain → assess → authority notification → subject notification → documentation → post-incident review. Include steps even if not applicable (mark status and explain).
+- If a step triggers communication (notify authority, notify subjects, internal exec briefing, etc.), provide a polished, ready-to-send text in `notification_template` (email or letter style, crisp and professional).
+- Authority and subject notification lists must align with determination: if not notifiable, state that and explain why.
+- Reference only the regulations provided. cite the clause you rely upon.
+- Cybersecurity summary should read like a concise SOC briefing (attack vector, likely actor, containment priorities, residual risk).
+
+Be decisive yet grounded. If evidence is weak for notification, recommend monitoring instead of forcing a report.
 """
-    client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
     try:
-        resp = client.chat.completions.create(
+        completion = client.chat.completions.create(
             model="gpt-4.1",
             messages=[
-                {"role": "system", "content": "You are an expert compliance advisor."},
+                {"role": "system", "content": "You are a meticulous privacy, legal, and cyber incident expert."},
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            temperature=0.25,
         )
-        text = resp.choices[0].message.content
-        # Prefer code block JSON at end
-        block = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-        json_str = ""
-        if block:
-            json_str = block.group(1)
-        else:
-            # fallback: try first { ... }
-            start = text.find('{')
-            if start != -1:
-                json_str = text[start:]
-        try:
-            json_out = json.loads(json_str)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"AI response JSON parse failed: {e}\nRAW:\n{text[:300]}...")
-        # Ensure action is string/list normalized
-        if isinstance(json_out.get('action'), list):
-            json_out['action'] = ', '.join(json_out['action'])
-        return json_out
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        print("AI Agentic ERROR:", e, '\n', tb)
-        raise HTTPException(status_code=500, detail=f"Failed: {str(e)} | Trace: {tb[:600]}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"OpenAI request failed: {exc}")
 
-@app.post("/compliance/agent_decide")
-def compliance_agent(req: AgentReq):
-    d = dynamic_agent(req)
-    reply = markdown_compliance_reply(d)
-    return {"markdown": reply, "raw": d}
+    text = completion.choices[0].message.content
+    parsed = _parse_model_json(text)
+
+    report_markdown = _build_markdown(parsed)
+    parsed["report_markdown"] = report_markdown
+    parsed["raw_model"] = text
+    parsed["input_meta"] = {
+        "business_id": req.business_id,
+        "evidence_meta": req.evidence_meta,
+    }
+    return parsed
+
+
+@app.post("/databreach/analyze")
+def analyze(req: BreachReq):
+    if not req.selected_regulations:
+        raise HTTPException(status_code=400, detail="selected_regulations cannot be empty.")
+    if not req.incident_text.strip():
+        raise HTTPException(status_code=400, detail="incident_text cannot be blank.")
+
+    result = generate_breach_plan(req)
+    return result

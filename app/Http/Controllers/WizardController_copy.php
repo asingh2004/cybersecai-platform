@@ -9,19 +9,448 @@ use App\Models\MetadataKey;
 use App\Models\DataSourceRef;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use App\Models\User;
+use App\Models\Country;
+use App\Models\BusinessProfile; 
 
 
 
 class WizardController extends Controller
 {
+    private $high_risk = [];
+    private $medium_risk = [];
 
-    private $high_risk = [ /* ... Your high risk fields ... */ ];
-    private $medium_risk = [ /* ... Your medium risk fields ... */ ];
+    private function defaultClassificationLevels(): array
+    {
+        return [
+            1 => ['id' => 1, 'name' => 'Public',                 'example' => 'Press releases',                'access' => 'None/minimal'],
+            2 => ['id' => 2, 'name' => 'Internal/Proprietary',   'example' => 'Internal memos',                'access' => 'Moderate'],
+            3 => ['id' => 3, 'name' => 'Confidential/Sensitive', 'example' => 'Client lists, some HR records', 'access' => 'Strong'],
+            4 => ['id' => 4, 'name' => 'Restricted',             'example' => 'PII, PHI, trade secrets',       'access' => 'Very strict'],
+        ];
+    }
 
-    // ========== Config Utility ==========
-    /**
-     * Get the current in-progress wizard config (for editing)
-     */
+    private function getBusinessContext(): array
+    {
+        $user = Auth::user();
+        $bizId = $user?->business_id;
+
+        $profile = $bizId
+            ? BusinessProfile::where('business_id', $bizId)->first()
+            : null;
+
+        $country      = $profile->country ?? $user->default_country ?? null;
+        $industry     = $profile->industry ?? $user->supplier_type ?? null;
+        $aboutCompany = $profile->about_company ?? null;
+
+        return [
+            'bizId'        => $bizId,
+            'profile'      => $profile,
+            'country'      => $country,
+            'industry'     => $industry,
+            'aboutCompany' => $aboutCompany,
+        ];
+    }
+
+    private function fetchLLMRegulations(string $country, string $industry, ?string $aboutCompany = null): array
+    {
+        $companyContext = $aboutCompany ? "Company context: {$aboutCompany}\n" : '';
+        $prompt = <<<EOD
+As a world-renowned expert in privacy and data regulation, for the country "{$country}" and the industry/sector "{$industry}":
+{$companyContext}
+List major privacy, industry specific and data regulations, laws, and standards that apply to organizations in that context, avoid duplications across states and country level regulations.
+If there is overlap between state and federal regulations only return federal regulatory requirement.
+Include other notable regulations that are likely to apply based on the industry and relationships (e.g., international collaborations).
+Return as a pure JSON array where each object has these properties only:
+- "standard": Standard or regulation name.
+- "jurisdiction": Jurisdiction/region.
+- "fields": List of regulated data fields as a JSON array of field names.
+EOD;
+
+        try {
+            $apiKey = config('services.openai.key') ?: env('OPENAI_API_KEY');
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Content-Type'  => 'application/json',
+            ])->post('https://api.openai.com/v1/chat/completions', [
+                'model' => 'gpt-4.1',
+                'messages' => [
+                    ['role' => 'system', 'content' => 'You are a world expert in global data regulation and compliance. Always answer precisely and output only the requested format.'],
+                    ['role' => 'user',   'content' => $prompt],
+                ],
+                'temperature' => 0.2,
+                'max_tokens'  => 2500,
+            ]);
+
+            if ($response->successful() && isset($response['choices'][0]['message']['content'])) {
+                return ['content' => $response['choices'][0]['message']['content'], 'error' => null];
+            }
+            $msg = is_string($response->body()) ? $response->body() : 'No valid response';
+            return ['content' => null, 'error' => 'OpenAI API error: ' . $msg];
+        } catch (\Exception $ex) {
+            return ['content' => null, 'error' => 'OpenAI Error: ' . $ex->getMessage()];
+        }
+    }
+
+    public function essentialSetup(Request $request)
+      {
+      $ctx = $this->getBusinessContext();
+      $user = Auth::user();
+      if (!$user) abort(403, 'Not authenticated');
+
+      $countries = Country::orderBy('name')->pluck('name', 'name');
+
+      // Section 1
+      $section1Complete = $ctx['profile'] && $ctx['profile']->industry && $ctx['profile']->country;
+
+      // Section 2
+      $levels = $this->defaultClassificationLevels();
+      $dcPreferredTags = [];
+      if ($ctx['profile'] && $ctx['profile']->data_classification) {
+          $dc = is_string($ctx['profile']->data_classification) ? json_decode($ctx['profile']->data_classification, true) : $ctx['profile']->data_classification;
+          if (is_array($dc) && isset($dc['levels'])) {
+              foreach ($dc['levels'] as $lvl) {
+                  if (isset($lvl['id'])) $dcPreferredTags[$lvl['id']] = $lvl['preferred_tag'] ?? '';
+              }
+          }
+      }
+      $section2Complete = ($ctx['profile'] && !empty($ctx['profile']->data_classification));
+
+      $activeSection = (int) $request->query('section', 1);
+      if ($activeSection < 1 || $activeSection > 4) $activeSection = 1;
+
+      // Section 3 (saved regs + status)
+      $savedRegulationsRaw = null;
+      if ($ctx['profile']) {
+          $savedRegulationsRaw = $ctx['profile']->selected_regulations ?? $ctx['profile']->selecte_regulations ?? null;
+      }
+      $section3Complete = false;
+      if ($savedRegulationsRaw) {
+          $decoded = is_string($savedRegulationsRaw) ? json_decode($savedRegulationsRaw, true) : (is_array($savedRegulationsRaw) ? $savedRegulationsRaw : null);
+          if (is_array($decoded) && count($decoded) > 0) $section3Complete = true;
+      }
+      $savedRegulations = is_array($savedRegulationsRaw) ? json_encode($savedRegulationsRaw) : $savedRegulationsRaw;
+      $sessionRecommendation = session('wizard.regulations_recommendation');
+      $sessionError          = session('wizard.regulations_error');
+
+      // Section 4 (subject categories) saved + status
+      $savedSubjectRaw = null;
+      if ($ctx['profile']) {
+          $savedSubjectRaw = $ctx['profile']->selected_subject_category ?? null;
+      }
+      $section4Complete = false;
+      if ($savedSubjectRaw) {
+          $decoded = is_string($savedSubjectRaw) ? json_decode($savedSubjectRaw, true) : (is_array($savedSubjectRaw) ? $savedSubjectRaw : null);
+          if (is_array($decoded) && count($decoded) > 0) $section4Complete = true;
+      }
+      $savedSubjectCategories = is_array($savedSubjectRaw) ? json_encode($savedSubjectRaw) : $savedSubjectRaw;
+      $sessionSubjRecommendation = session('wizard.subjects_recommendation');
+      $sessionSubjError          = session('wizard.subjects_error');
+
+      return view('wizard.essential_setup', [
+          'bizId'               => $ctx['bizId'],
+          'profile'             => $ctx['profile'],
+          'countries'           => $countries,
+          'activeSection'       => $activeSection,
+          'sectionStatuses'     => [
+              's1' => $section1Complete,
+              's2' => $section2Complete,
+              's3' => $section3Complete,
+              's4' => $section4Complete,
+          ],
+          // Section 2
+          'dcLevels'            => array_values($levels),
+          'dcPreferredTags'     => $dcPreferredTags,
+          // Section 3
+          'country'             => $ctx['country'],
+          'industry'            => $ctx['industry'],
+          'about_company'       => $ctx['aboutCompany'],
+          'savedRegulations'    => $savedRegulations,
+          'recommendationRaw'   => $sessionRecommendation,
+          'regulationsError'    => $sessionError,
+          // Section 4
+          'savedSubjectCategories' => $savedSubjectCategories,
+          'subjectsRecommendationRaw' => $sessionSubjRecommendation,
+          'subjectsError'            => $sessionSubjError,
+      ]);
+      }
+
+  
+  	private function fetchLLMSubjectCategories(string $country, string $industry, ?string $aboutCompany = null): array
+      {
+      $companyContext = $aboutCompany ? "Company context: {$aboutCompany}\n" : '';
+      $prompt = <<<EOD
+      For the country "{$country}" and the industry/sector "{$industry}":
+      {$companyContext}
+      List the likely data subject categories and a brief description for each. Output only a JSON array of objects with exactly these keys:
+
+      "category": short category name (e.g., Customers, Employees, Students, Financial Records, Health Information)
+      "description": a brief sentence describing the category
+      Example:
+      [
+      { "category": "Customers", "description": "Information about individuals who purchase or use your products/services." },
+      { "category": "Employees", "description": "Information about staff and HR records." }
+      ]
+      EOD;
+
+      try {
+          $apiKey = config('services.openai.key') ?: env('OPENAI_API_KEY');
+          $response = \Illuminate\Support\Facades\Http::withHeaders([
+              'Authorization' => 'Bearer ' . $apiKey,
+              'Content-Type'  => 'application/json',
+          ])->post('https://api.openai.com/v1/chat/completions', [
+              'model' => 'gpt-4.1',
+              'messages' => [
+                  ['role' => 'system', 'content' => 'You provide ONLY the requested JSON array without extra text.'],
+                  ['role' => 'user',   'content' => $prompt],
+              ],
+              'temperature' => 0.2,
+              'max_tokens'  => 1800,
+          ]);
+
+          if ($response->successful() && isset($response['choices'][0]['message']['content'])) {
+              return ['content' => $response['choices'][0]['message']['content'], 'error' => null];
+          }
+          $msg = is_string($response->body()) ? $response->body() : 'No valid response';
+          return ['content' => null, 'error' => 'OpenAI API error: ' . $msg];
+      } catch (\Exception $ex) {
+          return ['content' => null, 'error' => 'OpenAI Error: ' . $ex->getMessage()];
+      }
+      }
+  
+  
+    public function essentialSetupSection1Save(Request $request)
+    {
+    $user = Auth::user();
+    if (!$user) abort(403, 'Not authenticated');
+
+    $bizId = $user->business_id;
+    if (!$bizId) return back()->withErrors('Your account has no business_id. Please contact support.');
+
+    $validated = $request->validate([
+        'industry'      => ['required', 'string', 'max:255'],
+        'country'       => ['required', 'string', 'max:255'],
+        'about_company' => ['nullable', 'string', 'max:5000'],
+    ]);
+
+    $profile = BusinessProfile::firstOrNew(['business_id' => $bizId]);
+    $profile->industry       = $validated['industry'];
+    $profile->country        = $validated['country'];
+    $profile->about_company  = $validated['about_company'] ?? null;
+
+    // Only set audit columns if they exist in your DB
+    if (!$profile->exists && \Schema::hasColumn('business_profile', 'created_by')) {
+        $profile->created_by = $user->id;
+    }
+    if (\Schema::hasColumn('business_profile', 'updated_by')) {
+        $profile->updated_by = $user->id;
+    }
+
+    $profile->save();
+
+    return redirect()->route('wizard.essentialSetup', ['section' => 1])->with('success', 'Company profile saved successfully.');
+    }
+
+   public function essentialSetupSection2Save(Request $request)
+    {
+    $user = Auth::user();
+    if (!$user) abort(403, 'Not authenticated');
+
+    $bizId = $user->business_id;
+    if (!$bizId) return back()->withErrors('Your account has no business_id. Please contact support.');
+
+    $levels = $this->defaultClassificationLevels();
+    $validated = $request->validate([
+        'preferred_tags'   => ['sometimes', 'array'],
+        'preferred_tags.*' => ['nullable', 'string', 'max:100'],
+    ]);
+    $tags = $validated['preferred_tags'] ?? [];
+
+    $data = ['levels' => []];
+    foreach ($levels as $id => $level) {
+        $tag = trim($tags[$id] ?? '');
+        $data['levels'][] = [
+            'id'            => $level['id'],
+            'standard_name' => $level['name'],
+            'example'       => $level['example'],
+            'access'        => $level['access'],
+            'preferred_tag' => $tag !== '' ? $tag : null,
+        ];
+    }
+
+    $profile = BusinessProfile::firstOrNew(['business_id' => $bizId]);
+    $profile->data_classification = json_encode($data, JSON_UNESCAPED_UNICODE);
+    if (!$profile->exists && \Schema::hasColumn('business_profile', 'created_by')) {
+        $profile->created_by = $user->id;
+    }
+    if (\Schema::hasColumn('business_profile', 'updated_by')) {
+        $profile->updated_by = $user->id;
+    }
+    $profile->save();
+
+    return redirect()->route('wizard.essentialSetup', ['section' => 2])->with('success', 'Data classification saved.');
+    }
+
+    public function essentialSetupSection3Recommend(Request $request)
+    {
+        $ctx = $this->getBusinessContext();
+        $user = Auth::user();
+        if (!$user) abort(403, 'Not authenticated');
+
+        if (!$ctx['bizId']) {
+            return back()->withErrors('Your account has no business_id. Please contact support.');
+        }
+        if (!$ctx['profile'] || empty($ctx['country']) || empty($ctx['industry'])) {
+            return redirect()->route('wizard.essentialSetup', ['section' => 1])
+                ->withErrors('Please complete Section 1 (Company Profile) first: Country and Industry are required.');
+        }
+
+        $res = $this->fetchLLMRegulations($ctx['country'], $ctx['industry'], $ctx['aboutCompany']);
+        if ($res['content']) {
+            session(['wizard.regulations_recommendation' => $res['content']]);
+            session()->forget('wizard.regulations_error');
+        } else {
+            session()->forget('wizard.regulations_recommendation');
+            session(['wizard.regulations_error' => $res['error'] ?? 'LLM failed.']);
+        }
+
+        return redirect()->route('wizard.essentialSetup', ['section' => 3]);
+    }
+
+    public function essentialSetupSection3Save(Request $request)
+    {
+    $user = Auth::user();
+    if (!$user) abort(403, 'Not authenticated');
+
+    $bizId = $user->business_id;
+    if (!$bizId) return back()->withErrors('Your account has no business_id. Please contact support.');
+
+    $json = $request->input('regulations_json', '');
+    if (!$json) return back()->withErrors('Please select at least one standard.');
+
+    $arr = json_decode($json, true);
+    if (!is_array($arr) || !count($arr)) {
+        return back()->withErrors('Invalid selection. Please try again.');
+    }
+
+    // Decide which column to use
+    $targetColumn = null;
+    if (\Schema::hasColumn('business_profile', 'selected_regulations')) {
+        $targetColumn = 'selected_regulations';
+    } elseif (\Schema::hasColumn('business_profile', 'selecte_regulations')) {
+        $targetColumn = 'selecte_regulations';
+    } else {
+        \Log::error('BusinessProfile table missing selected_regulations column (or legacy selecte_regulations).');
+        return back()->withErrors('Server configuration error: selected_regulations column not found.');
+    }
+
+    try {
+        $profile = BusinessProfile::firstOrNew(['business_id' => $bizId]);
+        $profile->{$targetColumn} = json_encode($arr, JSON_UNESCAPED_UNICODE);
+        if (!$profile->exists && \Schema::hasColumn('business_profile', 'created_by')) {
+            $profile->created_by = $user->id;
+        }
+        if (\Schema::hasColumn('business_profile', 'updated_by')) {
+            $profile->updated_by = $user->id;
+        }
+        $profile->save();
+    } catch (\Throwable $e) {
+        \Log::error('[essentialSetupSection3Save] Failed to save regulations', ['err' => $e->getMessage()]);
+        return back()->withErrors('Failed to save selected regulations: ' . $e->getMessage());
+    }
+
+    session()->forget(['wizard.regulations_recommendation', 'wizard.regulations_error']);
+
+    return redirect()->route('wizard.essentialSetup', ['section' => 3])->with('success', 'Applicable regulations saved.');
+    }
+
+  	public function essentialSetupSection4Recommend(Request $request)
+      {
+      $ctx = $this->getBusinessContext();
+      $user = Auth::user();
+      if (!$user) abort(403, 'Not authenticated');
+
+      if (!$ctx['bizId']) {
+          return back()->withErrors('Your account has no business_id. Please contact support.');
+      }
+      if (!$ctx['profile'] || empty($ctx['country']) || empty($ctx['industry'])) {
+          return redirect()->route('wizard.essentialSetup', ['section' => 1])
+              ->withErrors('Please complete Section 1 (Company Profile) first: Country and Industry are required.');
+      }
+
+      $res = $this->fetchLLMSubjectCategories($ctx['country'], $ctx['industry'], $ctx['aboutCompany']);
+      if ($res['content']) {
+          session(['wizard.subjects_recommendation' => $res['content']]);
+          session()->forget('wizard.subjects_error');
+      } else {
+          session()->forget('wizard.subjects_recommendation');
+          session(['wizard.subjects_error' => $res['error'] ?? 'LLM failed.']);
+      }
+
+      return redirect()->route('wizard.essentialSetup', ['section' => 4]);
+      }
+  
+  	public function essentialSetupSection4Save(Request $request)
+    {
+    $user = Auth::user();
+    if (!$user) abort(403, 'Not authenticated');
+
+    $bizId = $user->business_id;
+    if (!$bizId) return back()->withErrors('Your account has no business_id. Please contact support.');
+
+    $json = $request->input('subject_categories_json', '');
+    if (!$json) return back()->withErrors('Please select at least one subject category.');
+
+    $arr = json_decode($json, true);
+    if (!is_array($arr) || !count($arr)) {
+        return back()->withErrors('Invalid selection. Please try again.');
+    }
+
+    // Build the likely_data_subject_area string from selected categories
+    $categories = [];
+    foreach ($arr as $item) {
+        if (!is_array($item)) continue;
+        $cat = $item['category'] ?? $item['name'] ?? $item['subject'] ?? $item['title'] ?? '';
+        $cat = trim((string)$cat);
+        if ($cat !== '') $categories[] = mb_strtolower($cat);
+    }
+    $categories = array_values(array_unique($categories));
+    $list = implode(', ', $categories);
+    $llmLine = '- "likely_data_subject_area": State data subject area, to use are - ' . $list . "\n";
+
+    try {
+        $profile = BusinessProfile::firstOrNew(['business_id' => $bizId]);
+        // Save JSON selection
+        if (\Schema::hasColumn('business_profile', 'selected_subject_category')) {
+            $profile->selected_subject_category = json_encode($arr, JSON_UNESCAPED_UNICODE);
+        } else {
+            return back()->withErrors('Server configuration error: selected_subject_category column not found.');
+        }
+        // Save the helper line if column exists
+        if (\Schema::hasColumn('business_profile', 'subject_category_for_llm')) {
+            $profile->subject_category_for_llm = $llmLine;
+        }
+
+        if (!$profile->exists && \Schema::hasColumn('business_profile', 'created_by')) {
+            $profile->created_by = $user->id;
+        }
+        if (\Schema::hasColumn('business_profile', 'updated_by')) {
+            $profile->updated_by = $user->id;
+        }
+
+        $profile->save();
+    } catch (\Throwable $e) {
+        \Log::error('[essentialSetupSection4Save] Failed to save subject categories', ['err' => $e->getMessage()]);
+        return back()->withErrors('Failed to save subject categories: ' . $e->getMessage());
+    }
+
+    // Clear any recommendation sessions
+    session()->forget(['wizard.subjects_recommendation', 'wizard.subjects_error']);
+
+    return redirect()->route('wizard.essentialSetup', ['section' => 4])->with('success', 'Subject categories saved.');
+    }
+  
+    // Existing wizard steps and other methods (unchanged)
     private function config()
     {
         $editId = session('wizard.edit_id');
@@ -31,9 +460,6 @@ class WizardController extends Controller
         abort(404, "No data configuration wizard started. Please use '+ Add New Data Source' to begin.");
     }
 
-    // ========== Wizard Flow Steps ==========
-
-    // Step 1: Data Sources (Radio)
     public function startWizard(Request $request)
     {
         $newConfig = auth()->user()->dataConfigs()->create([]);
@@ -46,29 +472,25 @@ class WizardController extends Controller
         return redirect()->route('wizard.step1');
     }
 
-    
-  	public function step1()
-	{
-    	$selected = session('wizard.data_sources');
-    	if (is_null($selected) || $selected === '') {
-        	$selected = $this->config()->data_sources ?? '';
-    	}
-    	if (is_array($selected)) $selected = $selected[0] ?? '';
-    	// Updated: fetch name + description
-    	$sources = DataSourceRef::select('data_source_name', 'description')->get();
-    	return view('wizard.step1', ['sources' => $sources, 'selected' => $selected]);
-	}
-  
+    public function step1()
+    {
+        $selected = session('wizard.data_sources');
+        if (is_null($selected) || $selected === '') {
+            $selected = $this->config()->data_sources ?? '';
+        }
+        if (is_array($selected)) $selected = $selected[0] ?? '';
+        $sources = DataSourceRef::select('data_source_name', 'description')->get();
+        return view('wizard.step1', ['sources' => $sources, 'selected' => $selected]);
+    }
+
     public function step1Post(Request $request)
     {
         $d = $request->validate(['data_sources'=>'required|string']);
         session(['wizard.data_sources' => $d['data_sources']]);
-        // Save as string
         $this->saveWizardToConfig(['data_sources' => $d['data_sources']]);
         return redirect()->route('wizard.step2');
     }
 
-    // Step 2: Regulations/Fields
     public function step2()
     {
         $config = $this->config();
@@ -76,7 +498,6 @@ class WizardController extends Controller
         $regJson = $sessionReg ?: ($config->regulations ?? null);
         $standards = ComplianceStandard::all();
 
-        // For restore (after edit), grab checked standards by name
         $selected = [];
         if ($regJson) {
             $arr = is_string($regJson) ? json_decode($regJson, true) : $regJson;
@@ -97,10 +518,8 @@ class WizardController extends Controller
             'config'        => $config,
         ]);
     }
-  
 
-
-   public function step2Post(Request $request)
+    public function step2Post(Request $request)
     {
         $json = $request->input('regulations_json');
         if (empty($json)) {
@@ -115,46 +534,185 @@ class WizardController extends Controller
         return redirect()->route('wizard.step3');
     }
 
-    // Step 3: Metadata
     public function step3()
     {
+        $levels = [
+            1 => ['id' => 1, 'name' => 'Public', 'example' => 'Press releases', 'access' => 'None/minimal'],
+            2 => ['id' => 2, 'name' => 'Internal/Proprietary', 'example' => 'Internal memos', 'access' => 'Moderate'],
+            3 => ['id' => 3, 'name' => 'Confidential/Sensitive', 'example' => 'Client lists, some HR records', 'access' => 'Strong'],
+            4 => ['id' => 4, 'name' => 'Restricted', 'example' => 'PII, PHI, trade secrets', 'access' => 'Very strict'],
+        ];
+
         $config = $this->config();
-        $metadata = session('wizard.metadata');
-        if (!$metadata) {
-            $metaFromDb = $config->metadata ?? [];
-            if (is_string($metaFromDb)) {
-                $metadata = json_decode($metaFromDb, true) ?: [];
-            } else {
-                $metadata = $metaFromDb;
+        $preferredTags = [];
+        $classificationData = $config->data_classification ?? [];
+        if (is_string($classificationData)) $classificationData = json_decode($classificationData, true);
+        if (is_array($classificationData) && isset($classificationData['levels'])) {
+            foreach ($classificationData['levels'] as $lvl) {
+                $preferredTags[$lvl['id']] = $lvl['preferred_tag'] ?? '';
             }
         }
-        $allKeys = MetadataKey::all();
-        $selectedKeys = old(
-            'metadata_keys',
-            isset($metadata['selected_metadata_keys'])
-                ? $metadata['selected_metadata_keys']
-                : $allKeys->pluck('id')->toArray()
-        );
+        $preferredTags = array_merge($preferredTags, old('preferred_tags', []));
         return view('wizard.step3', [
-            'allKeys' => $allKeys,
-            'selectedKeys' => $selectedKeys,
+            'levels' => array_values($levels),
+            'preferredTags' => $preferredTags,
         ]);
     }
 
     public function step3Post(Request $request)
     {
-        $allKeyIds = MetadataKey::pluck('id')->toArray();
-        $d = $request->validate([
-            'metadata_keys' => 'required|array|min:1',
-            'metadata_keys.*' => 'in:' . implode(',', $allKeyIds),
-        ]);
-        $metadata = [
-            'selected_metadata_keys' => $d['metadata_keys'],
+        $levels = [
+            1 => ['id' => 1, 'name' => 'Public', 'example' => 'Press releases', 'access' => 'None/minimal'],
+            2 => ['id' => 2, 'name' => 'Internal/Proprietary', 'example' => 'Internal memos', 'access' => 'Moderate'],
+            3 => ['id' => 3, 'name' => 'Confidential/Sensitive', 'example' => 'Client lists, some HR records', 'access' => 'Strong'],
+            4 => ['id' => 4, 'name' => 'Restricted', 'example' => 'PII, PHI, trade secrets', 'access' => 'Very strict'],
         ];
-        session(['wizard.metadata' => $metadata]);
-        $this->saveWizardToConfig(['metadata' => json_encode($metadata)]);
+        $validated = $request->validate([
+            'preferred_tags'   => ['sometimes', 'array'],
+            'preferred_tags.*' => ['nullable', 'string', 'max:100'],
+        ]);
+        $inputTags = $validated['preferred_tags'] ?? [];
+        $dataClassification = [ 'levels' => [] ];
+        foreach ($levels as $id => $level) {
+            $tag = trim($inputTags[$id] ?? '');
+            $dataClassification['levels'][] = [
+                'id' => $level['id'],
+                'standard_name' => $level['name'],
+                'example' => $level['example'],
+                'access' => $level['access'],
+                'preferred_tag' => $tag !== '' ? $tag : null,
+            ];
+        }
+        $this->saveWizardToConfig(['data_classification' => json_encode($dataClassification)]);
         return redirect()->route('wizard.step5');
     }
+  
+ 	public function privacyRegulations(Request $request)
+    {
+    $ctx = $this->getBusinessContext();
+
+    // Use business_profile values primarily; fallback already handled in helper
+    $country  = $ctx['country'] ?? 'Australia';
+    $industry = $ctx['industry'] ?? 'General Sector';
+
+    $data = [
+    'result'   => null,
+    'error'    => null,
+    'country'  => $country,
+    'industry' => $industry,
+    ];
+
+    if ($request->isMethod('post')) {
+    $res = $this->fetchLLMRegulations($country, $industry, $ctx['aboutCompany']);
+    if ($res['content']) {
+    $data['result'] = $res['content'];
+    } else {
+    $data['error'] = $res['error'] ?? 'Unknown error';
+    }
+    }
+    return view('wizard.privacy_regulations', $data);
+    }
+
+/*public function subjectCategories(Request $request)
+{
+    $user = \Auth::user();
+    $country = $user->default_country ?? 'Australia';
+    $industry = $user->supplier_type ?? 'General Sector';
+
+    $data = [
+        'result'   => null,
+        'error'    => null,
+        'country'  => $country,
+        'industry' => $industry,
+    ];
+
+    if ($request->isMethod('post')) {
+        $prompt = "For the country: \"{$country}\" and the industry/sector: \"{$industry}\", "
+                . "list the likely data subject areas, including types of sensitive information that would be relevant. "
+                . "For each category, provide a brief description. Respond in JSON format as an array of objects, each with 'category' and 'description' keys.";
+
+        try {
+            $apiKey = config('services.openai.key') ?: env('OPENAI_API_KEY');
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Content-Type' => 'application/json',
+            ])->post('https://api.openai.com/v1/chat/completions', [
+                'model' => 'gpt-4.1',
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'You are a helpful assistant who provides relevant subject categories and short descriptions based on country and industry context.'
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $prompt,
+                    ]
+                ],
+                'temperature' => 0.3,
+                'max_tokens' => 3000,
+            ]);
+
+            if ($response->successful() && isset($response['choices'][0]['message']['content'])) {
+                $data['result'] = $response['choices'][0]['message']['content'];
+            } else {
+                $msg = is_string($response->body()) ? $response->body() : 'No valid response';
+                $data['error'] = 'OpenAI API error: ' . $msg;
+            }
+        } catch (\Exception $ex) {
+            $data['error'] = 'OpenAI Error: ' . $ex->getMessage();
+        }
+    }
+    return view('wizard.subject_categories', $data);
+}*/
+  
+  public function subjectCategories(Request $request)
+{
+    $ctx = $this->getBusinessContext();
+
+    $country  = $ctx['country'] ?? 'Australia';
+    $industry = $ctx['industry'] ?? 'General Sector';
+
+    $data = [
+        'result'   => null,
+        'error'    => null,
+        'country'  => $country,
+        'industry' => $industry,
+    ];
+
+    if ($request->isMethod('post')) {
+        $prompt = "For the country: \"{$country}\" and the industry/sector: \"{$industry}\", "
+            . "list the likely data subject areas, including types of sensitive information that would be relevant. "
+            . "For each category, provide a brief description. Respond in JSON format as an array of objects, "
+            . "each with 'category' and 'description' keys.";
+        try {
+            $apiKey = config('services.openai.key') ?: env('OPENAI_API_KEY');
+            $response = \Illuminate\Support\Facades\Http::withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Content-Type'  => 'application/json',
+            ])->post('https://api.openai.com/v1/chat/completions', [
+                'model' => 'gpt-4.1',
+                'messages' => [
+                    ['role' => 'system', 'content' => 'You are a helpful assistant who provides relevant subject categories based on country and industry context.'],
+                    ['role' => 'user',   'content' => $prompt],
+                ],
+                'temperature' => 0.3,
+                'max_tokens'  => 3000,
+            ]);
+
+            if ($response->successful() && isset($response['choices'][0]['message']['content'])) {
+                $data['result'] = $response['choices'][0]['message']['content'];
+            } else {
+                $msg = is_string($response->body()) ? $response->body() : 'No valid response';
+                $data['error'] = 'OpenAI API error: ' . $msg;
+            }
+        } catch (\Exception $ex) {
+            $data['error'] = 'OpenAI Error: ' . $ex->getMessage();
+        }
+    }
+    return view('wizard.subject_categories', $data);
+}
+  
+ 
 
     // Step 5: API
   
@@ -1219,212 +1777,50 @@ private function getJsonFilesForUserConfigs()
     return 'unknown';
 }
 
-	public function fileGraphNetwork()
+	  
+  
+  // Route: GET /yourroute/file-graph-table
+
+
+  public function fileGraphTable(Request $request)
 {
-    $jsonFiles = $this->getJsonFilesForUserConfigs();
-    $allData = [];
-    $failFiles = [];
-
-    foreach ($jsonFiles as $file) {
-        \Log::info("Reading JSON for graph: $file");
-        $content = @file_get_contents($file);
-        if ($content === false) {
-            \Log::warning("Could not read: $file");
-            $failFiles[] = $file;
-            continue;
-        }
-        $json = json_decode($content, true);
-        if (is_array($json) && isset($json[0]) && is_array($json[0])) {
-            foreach ($json as &$record) {
-                if (is_array($record))
-                    $record['_datasource'] = $this->detectSourceFromPath($file);
-            }
-            unset($record);
-            $allData = array_merge($allData, $json);
-        } elseif (is_array($json)) {
-            $json['_datasource'] = $this->detectSourceFromPath($file);
-            $allData[] = $json;
-        } else {
-            \Log::warning("Invalid or empty JSON in: $file");
-            $failFiles[] = $file;
-        }
-    }
-
-    // Group/entity optgroups for dropdown
-    $userSiteEntities = [];
-    $otherSources = [];
-    $hasUnassigned = false;
-
-    foreach ($allData as $idx => &$item) {
-        if (isset($item['user_id'])) {
-            $entityKey = 'User-' . $item['user_id'];
-            $userSiteEntities[$entityKey] = true;
-            $item['_entity'] = $entityKey;
-        } elseif (isset($item['site_id'])) {
-            $entityKey = 'Site-' . $item['site_id'];
-            $userSiteEntities[$entityKey] = true;
-            $item['_entity'] = $entityKey;
-        } elseif (isset($item['_datasource']) && $item['_datasource']) {
-            $entityKey = 'SRC_' . $item['_datasource'];
-            $otherSources[$entityKey] = ucfirst($item['_datasource']) . ' Files';
-            $item['_entity'] = $entityKey;
-        } else {
-            $item['_entity'] = '__UNASSIGNED__';
-            $hasUnassigned = true;
-        }
-    }
-    unset($item);
-
-    $filterGroups = [];
-    if (count($userSiteEntities)) {
-        $filterGroups[] = [ 'label' => 'User/Site Assignments', 'values' => array_keys($userSiteEntities) ];
-    }
-    if (count($otherSources)) {
-        $filterGroups[] = [ 'label' => 'Other Data Sources', 'values' => array_keys($otherSources) ];
-    }
-    if ($hasUnassigned) {
-        $filterGroups[] = [ 'label' => 'No Assignment', 'values' => [ '__UNASSIGNED__' ] ];
-    }
-
-    return view('wizard.file_graph_d3', [
-        'graphData'    => json_encode($allData),
-        'filterGroups' => json_encode($filterGroups),
-        'sourceLabels' => json_encode($otherSources),
+    $filterGroups = $this->getFilterGroupsAndSources();
+    // Don't encode as JSON here!
+    return view('wizard.file_graph_datatable', [
+        'filterGroups' => $filterGroups['groups'],
+        'sourceLabels' => $filterGroups['sources'],
     ]);
 }
+
 
   
-public function fileGraphTable()
-{
-    $jsonFiles = $this->getJsonFilesForUserConfigs();
-    $allData = [];
-    $failFiles = [];
-
-    foreach ($jsonFiles as $file) {
-        \Log::info("Reading JSON for table: $file");
-        $content = @file_get_contents($file);
-        if ($content === false) {
-            \Log::warning("Could not read: $file");
-            $failFiles[] = $file;
-            continue;
-        }
-        $json = json_decode($content, true);
-        if (is_array($json) && isset($json[0]) && is_array($json[0])) {
-            foreach ($json as &$record) {
-                if (is_array($record))
-                    $record['_datasource'] = $this->detectSourceFromPath($file);
-            }
-            unset($record);
-            $allData = array_merge($allData, $json);
-        } elseif (is_array($json)) {
-            $json['_datasource'] = $this->detectSourceFromPath($file);
-            $allData[] = $json;
-        } else {
-            \Log::warning("Invalid or empty JSON in: $file");
-            $failFiles[] = $file;
-        }
-    }
-
-    // Grouping logic for the dropdowns:
-    $userSiteEntities = [];
-    $otherSources = [];
-    $hasUnassigned = false;
-
-    foreach ($allData as $idx => &$item) {
-        if (isset($item['user_id'])) {
-            $entityKey = 'User-' . $item['user_id'];
-            $userSiteEntities[$entityKey] = true;
-            $item['_entity'] = $entityKey;
-        } elseif (isset($item['site_id'])) {
-            $entityKey = 'Site-' . $item['site_id'];
-            $userSiteEntities[$entityKey] = true;
-            $item['_entity'] = $entityKey;
-        } elseif (isset($item['_datasource']) && $item['_datasource']) {
-            $entityKey = 'SRC_' . $item['_datasource'];
-            $otherSources[$entityKey] = ucfirst($item['_datasource']) . ' Files';
-            $item['_entity'] = $entityKey;
-        } else {
-            $item['_entity'] = '__UNASSIGNED__';
-            $hasUnassigned = true;
-        }
-    }
-    unset($item);
-
-    $filterGroups = [];
-    if (count($userSiteEntities)) {
-        $filterGroups[] = [ 'label' => 'User/Site Assignments', 'values' => array_keys($userSiteEntities) ];
-    }
-    if (count($otherSources)) {
-        $filterGroups[] = [ 'label' => 'Other Data Sources', 'values' => array_keys($otherSources) ];
-    }
-    if ($hasUnassigned) {
-        $filterGroups[] = [ 'label' => 'No Assignment', 'values' => [ '__UNASSIGNED__' ] ];
-    }
-
-    return view('wizard.file_graph_datatable', [
-        'tableData'    => json_encode($allData),
-        'filterGroups' => json_encode($filterGroups),
-        'sourceLabels' => json_encode($otherSources),
-    ]);
-}
-
-
   public function fileSummaryPyramid(Request $request)
 {
-    $jsonFiles = $this->getJsonFilesForUserConfigs();
-    $allData = [];
-    $failFiles = [];
+    // For very high scale, only scan a small sample to offer initial filter groups for the UI.
+    $jsonFiles = array_slice($this->getJsonFilesForUserConfigs(), 0, 100);
 
-    foreach ($jsonFiles as $file) {
-        \Log::info("Reading JSON for pyramid: $file");
-        $content = @file_get_contents($file);
-        if ($content === false) {
-            \Log::warning("Could not read: $file");
-            $failFiles[] = $file;
-            continue;
-        }
-        $json = json_decode($content, true);
-        if (is_array($json) && isset($json[0]) && is_array($json[0])) {
-            foreach ($json as &$record) {
-                if (is_array($record))
-                    $record['_datasource'] = $this->detectSourceFromPath($file);
-            }
-            unset($record);
-            $allData = array_merge($allData, $json);
-        } elseif (is_array($json)) {
-            $json['_datasource'] = $this->detectSourceFromPath($file);
-            $allData[] = $json;
-        } else {
-            \Log::warning("Invalid or empty JSON in: $file");
-            $failFiles[] = $file;
-        }
-    }
-
-    // Build mapping for dropdown
     $userSiteEntities = [];
     $otherSources = [];
     $hasUnassigned = false;
 
-    foreach ($allData as $idx => &$item) {
-        if (isset($item['user_id'])) {
-            $entityKey = 'User-' . $item['user_id'];
-            $userSiteEntities[$entityKey] = true;
-            $item['_entity'] = $entityKey;
-        } elseif (isset($item['site_id'])) {
-            $entityKey = 'Site-' . $item['site_id'];
-            $userSiteEntities[$entityKey] = true;
-            $item['_entity'] = $entityKey;
-        } elseif (isset($item['_datasource']) && $item['_datasource']) {
-            $entityKey = 'SRC_' . $item['_datasource'];
-            $otherSources[$entityKey] = ucfirst($item['_datasource']) . ' Files'; // Human-friendly
-            $item['_entity'] = $entityKey;
-        } else {
-            $item['_entity'] = '__UNASSIGNED__';
-            $hasUnassigned = true;
+    foreach ($jsonFiles as $file) {
+        $content = @file_get_contents($file);
+        if ($content === false) continue;
+        $json = json_decode($content, true);
+        $rows = (is_array($json) && isset($json[0]) && is_array($json[0])) ? $json : (is_array($json) ? [$json] : []);
+        foreach ($rows as $item) {
+            $src = $this->detectSourceFromPath($file);
+            if (isset($item['user_id'])) {
+                $userSiteEntities['User-' . $item['user_id']] = true;
+            } elseif (isset($item['site_id'])) {
+                $userSiteEntities['Site-' . $item['site_id']] = true;
+            } elseif ($src) {
+                $otherSources['SRC_' . $src] = ucfirst($src) . ' Files';
+            } else {
+                $hasUnassigned = true;
+            }
         }
     }
-    unset($item);
-
     $filterGroups = [];
     if (count($userSiteEntities)) {
         $filterGroups[] = [ 'label' => 'User/Site Assignments', 'values' => array_keys($userSiteEntities) ];
@@ -1437,12 +1833,170 @@ public function fileGraphTable()
     }
 
     return view('wizard.filesummary_pyramid', [
-        'tableData'    => json_encode($allData),
+        // No allData sent!
         'filterGroups' => json_encode($filterGroups),
         'sourceLabels' => json_encode($otherSources),
     ]);
 }
 
+  
+  public function apiPyramidStats(Request $request)
+{
+    $entity = $request->query('entity');
+    $riskLevel = $request->query('riskLevel');
+    $page = (int) $request->query('page', 1);
+    $pageSize = (int) $request->query('pageSize', 50);
+
+    $jsonFiles = $this->getJsonFilesForUserConfigs();
+    $riskCounts = ['high' => 0, 'medium' => 0, 'low' => 0, 'none' => 0];
+    $files = [];
+    foreach ($jsonFiles as $file) {
+        $content = @file_get_contents($file); if ($content === false) continue;
+        $json = json_decode($content, true);
+        $rows = (is_array($json) && isset($json[0]) && is_array($json[0])) ? $json : (is_array($json) ? [$json] : []);
+        foreach ($rows as $item) {
+            $src = $this->detectSourceFromPath($file);
+            $item['_entity'] = $this->extractEntity($item, $src);
+            $risk = $this->extractRiskLevel($item['llm_response'] ?? '');
+            if ($entity && $item['_entity'] !== $entity) continue;
+            $riskCounts[$risk]++;
+            if ($riskLevel && $risk === $riskLevel) {
+                $files[] = [
+                    'file_name' => $item['file_name']??'',
+                    'file_type' => $item['file_type']??'',
+                    '_datasource' => $src,
+                    'size_bytes' => $item['size_bytes']??0,
+                    'llm_response' => $item['llm_response']??'',
+                ];
+            }
+        }
+    }
+
+    // For riskLevel panel: return only a page
+    $filesTotal = count($files);
+    $start = max(0, ($page - 1) * $pageSize);
+    $filesPage = array_slice($files, $start, $pageSize);
+
+    return response()->json([
+        'counts' => $riskCounts,
+        'files'  => $riskLevel ? $filesPage : [],
+        'filesTotal' => $riskLevel ? $filesTotal : 0,
+        'page' => $page,
+        'pageSize' => $pageSize,
+    ]);
+}
+  
+  // Route: GET /api/files-table
+    
+  public function apiFilesTable(Request $request)
+{
+    $page = max(1, (int) $request->input('page', 1));
+    $pageSize = max(1, (int) $request->input('pageSize', 50));
+    $entity = $request->input('entity');
+    $riskLevel = $request->input('riskLevel');
+    $search = trim($request->input('search', ''));
+
+    $jsonFiles = $this->getJsonFilesForUserConfigs();
+    $jsonFiles = array_slice($jsonFiles, 0, 100);
+    $results = [];
+    $total = 0;
+
+    $startIndex = ($page - 1) * $pageSize;
+    $endIndex = $startIndex + $pageSize;
+
+    $matchedIndex = 0;
+    foreach ($jsonFiles as $file) {
+        $content = @file_get_contents($file);
+        if ($content === false) continue;
+        $json = json_decode($content, true);
+        if (!is_array($json)) continue;
+        $rows = (isset($json[0]) && is_array($json[0])) ? $json : [$json];
+
+        foreach ($rows as $row) {
+            $row['_datasource'] = $this->detectSourceFromPath($file);
+            $row['_entity'] = $this->extractEntity($row);
+
+            // --- Robust risk extraction section (use your best PHP extractRiskLevel) ---
+            $rowRisk = $this->extractRiskLevel($row['llm_response'] ?? '');
+
+            if ($entity && $row['_entity'] !== $entity) continue;
+            if ($riskLevel && $rowRisk !== $riskLevel) continue;
+            if ($search && (!isset($row['file_name']) || stripos($row['file_name'], $search) === false)) continue;
+
+            if ($matchedIndex >= $startIndex && $matchedIndex < $endIndex) {
+                // Optionally pass through fields you want returned
+                $results[] = $row;
+            }
+            $matchedIndex++;
+        }
+    }
+    $total = $matchedIndex;
+
+    return response()->json([
+        'data' => $results,
+        'recordsTotal' => $total,
+        'recordsFiltered' => $total,
+    ]);
+}
+     private function extractEntity($item)
+	{
+    	if (isset($item['user_id'])) return 'User-' . $item['user_id'];
+    	if (isset($item['site_id'])) return 'Site-' . $item['site_id'];
+    	if (isset($item['_datasource']) && $item['_datasource']) return 'SRC_' . $item['_datasource'];
+    	return '__UNASSIGNED__';
+	}
+  
+	
+  
+  
+  private function extractRiskLevel($llm_response)
+{
+    if (!$llm_response) return 'none';
+
+    $clean = trim((string)$llm_response);
+
+    // Remove double quotes if double-encoded
+    if (substr($clean, 0, 1) === '"' && substr($clean, -1) === '"') {
+        $clean = substr($clean, 1, -1);
+    }
+
+    // Try to parse as JSON
+    $json = json_decode($clean, true);
+    if (is_array($json)) {
+        // 1) Prefer "overall_risk_rating"
+        if (!empty($json['overall_risk_rating'])) {
+            $risk = strtolower($json['overall_risk_rating']);
+            if (in_array($risk, ['high', 'medium', 'low', 'none'])) return $risk;
+        }
+        // 2) If results array, find max
+        if (!empty($json['results']) && is_array($json['results'])) {
+            $rank = ['high'=>3,'medium'=>2,'low'=>1,'none'=>0];
+            $max = 'none';
+            foreach ($json['results'] as $result) {
+                if (!empty($result['risk'])) {
+                    $risk = strtolower($result['risk']);
+                    if (isset($rank[$risk]) && $rank[$risk] > $rank[$max]) $max = $risk;
+                }
+            }
+            return $max;
+        }
+    }
+
+    // 3) Fallback: regex for plaintext LLM
+    $riskPattern = '/overall\s+(?:risk\s+rating|rating)\s*(?:is)?\s*:?[\s*_`]*\**\s*(high|medium|low|none)\s*\**/i';
+    if (preg_match($riskPattern, $clean, $m) && !empty($m[1])) {
+        $risk = strtolower($m[1]);
+        if (in_array($risk, ['high', 'medium', 'low', 'none'])) return $risk;
+    }
+
+    // 4) Legacy: scan all lines for any mention
+    $lastRisk = null;
+    if (preg_match_all($riskPattern, $clean, $matches) && !empty($matches[1])) {
+        $lastRisk = strtolower(end($matches[1]));
+    }
+    if ($lastRisk && in_array($lastRisk, ['high', 'medium', 'low', 'none'])) return $lastRisk;
+    return 'none';
+}
   
   public function auditorPersonaDashboard()
 {
@@ -1635,6 +2189,57 @@ private function parseLlmResponse($llm_response)
         }
         return $count;
     }
+  
+  private function getFilterGroupsAndSources()
+{
+    // Only scan first ~N files for initial entities/sources to keep it quick
+    $jsonFiles = array_slice($this->getJsonFilesForUserConfigs(), 0, 100);
+    $userSiteEntities = [];
+    $otherSources = [];
+    $hasUnassigned = false;
+
+    foreach ($jsonFiles as $file) {
+        $fh = @fopen($file, 'r');
+        if (!$fh) continue;
+        $content = stream_get_contents($fh);
+        fclose($fh);
+
+        $json = json_decode($content, true);
+        if (!is_array($json)) continue;
+
+        $rows = (isset($json[0]) && is_array($json[0])) ? $json : [$json];
+        foreach ($rows as $item) {
+            $src = $this->detectSourceFromPath($file);
+            $entity = $this->extractEntity($item);
+            if (isset($item['user_id'])) {
+                $userSiteEntities['User-' . $item['user_id']] = true;
+            } elseif (isset($item['site_id'])) {
+                $userSiteEntities['Site-' . $item['site_id']] = true;
+            } elseif ($src) {
+                $otherSources['SRC_' . $src] = ucfirst($src) . ' Files';
+            } else {
+                $hasUnassigned = true;
+            }
+        }
+    }
+    $filterGroups = [];
+    if (count($userSiteEntities)) {
+        $filterGroups[] = [ 'label' => 'User/Site Assignments', 'values' => array_keys($userSiteEntities) ];
+    }
+    if (count($otherSources)) {
+        $filterGroups[] = [ 'label' => 'Other Data Sources', 'values' => array_keys($otherSources) ];
+    }
+    if ($hasUnassigned) {
+        $filterGroups[] = [ 'label' => 'No Assignment', 'values' => [ '__UNASSIGNED__' ] ];
+    }
+    return [
+        'groups' => $filterGroups,
+        'sources' => $otherSources
+    ];
+}
+ 
+  
+  
 
     /**
      * Dashboard & Files Page
@@ -1676,6 +2281,9 @@ private function parseLlmResponse($llm_response)
         ]);
     }
 
+  
+
+  
     /**
      * Prepare file with compliance & permissions parsed
      */

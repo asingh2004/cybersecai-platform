@@ -88,9 +88,10 @@ class DocsGeneratorController extends Controller
         // ========== NOW BEGIN CONTROLLER 2's LOGIC ==========
         // Step 3: Call Agentic /generate_sensitive_docs API using classifiedData if available
         $request_data = [
-            'user_id' => strval($userId),
-            'json_data' => $classifiedData,
-        ];
+    		'user_id' => strval($userId),
+    		'organisation_name' => $organisation,  // Add this key!
+    		'json_data' => $classifiedData,
+		];
 
         $agentic_url = $this->agenticDocsUrl . '/agentic/generate_sensitive_docs';
 
@@ -213,143 +214,10 @@ class DocsGeneratorController extends Controller
         ]);
     }
 
-    // ---------- The listing/index method (displays grouped docs) ----------
-   /* public function index()
-    {
-        $userId = (string)auth()->id();
-        $groupedDocs = [];
-        $results = [];
-        $user_docs_dir = base_path('databreachmgmt/' . $userId);
 
-        Log::info("[DocsGenerator][index] userId: $userId, user_docs_dir: $user_docs_dir");
-
-        $groupOrder = ['Policy', 'Plan', 'Procedure', 'Register/Log', 'Other'];
-
-        if (is_dir($user_docs_dir)) {
-            Log::info("[DocsGenerator][index] Directory exists: $user_docs_dir");
-
-            foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($user_docs_dir)) as $file) {
-                if ($file->isFile() && strtolower($file->getExtension()) === 'json' && strpos($file->getPath(), 'generated') !== false) {
-                    $doc_data = json_decode(file_get_contents($file->getPathname()), true);
-
-                    // Support old/new formats
-                    if (isset($doc_data['DocumentType'])) {
-                        $docs_out = [$doc_data];
-                    } elseif (isset($doc_data['documents'])) {
-                        $docs_out = $doc_data['documents'];
-                    } else {
-                        continue;
-                    }
-
-                    foreach ($docs_out as $doc) {
-                        $rel_dir = basename(dirname($file->getPathname()));
-                        $json_name = $file->getBasename();
-                        $docx_name = str_replace('.json', '.docx', $json_name);
-                        $docx_path = $file->getPath() . DIRECTORY_SEPARATOR . $docx_name;
-                        $has_docx = file_exists($docx_path);
-
-                        $file_display_name = $doc['file_display_name'] ?? null;
-                        if (!$file_display_name) {
-                            $tmp = $json_name;
-                            $tmp = str_replace('_generated', '', $tmp);
-                            $tmp = str_replace('.json', '', $tmp);
-                            $tmp = str_replace('_', ' ', $tmp);
-                            $file_display_name = ucwords(trim($tmp));
-                        }
-
-                        $doc_group = $doc['doc_group'] ?? null;
-                        if (!$doc_group) {
-                            $dt = strtolower($doc['DocumentType'] ?? '');
-                            if (strpos($dt, 'policy') !== false) $doc_group = 'Policy';
-                            elseif (strpos($dt, 'plan') !== false) $doc_group = 'Plan';
-                            elseif (strpos($dt, 'procedure') !== false || strpos($dt, 'process') !== false) $doc_group = 'Procedure';
-                            elseif (preg_match('/register|log|record/', $dt)) $doc_group = 'Register/Log';
-                            else $doc_group = 'Other';
-                        }
-
-                        $is_mandatory = $doc['is_mandatory'] ?? null;
-                        if ($is_mandatory === null) {
-                            $lob = strtolower($doc['LegalOrBestPractice'] ?? '');
-                            $is_mandatory = (strpos($lob, 'mandatory') !== false);
-                        }
-
-                        ///$org = $doc['organisation_name'] ?? 'Unknown Organisation';
-                      
-                      
-                      	if (!empty($doc['organisation_name'])) {
-    						$org = $doc['organisation_name'];
-						} elseif (!empty($doc['OrganisationName'])) {
-    						$org = $doc['OrganisationName'];
-						} elseif (!empty($doc['markdown'])) {
-    						// Try to extract org from the first line of markdown:
-    						if (preg_match('/^#\s*([^\n]+)[\r\n]/', ltrim($doc['markdown']), $m)) {
-        						$org = trim($m[1]);
-    						} else {
-        						$org = 'Unknown Organisation';
-    						}
-						} else {
-    						$org = 'Unknown Organisation';
-						}
-
-                        $json_download_url = route('agenticai.docs.json_download', [
-                            'user_id' => $userId,
-                            'filename' => $rel_dir . '/' . $json_name,
-                        ]);
-                        $docx_download_url = $has_docx ? route('agenticai.docs.docx_download', [
-                            'user_id' => $userId,
-                            'filename' => $rel_dir . '/' . $docx_name,
-                        ]) : '';
-
-                        $doc_entry = [
-                            'file_display_name' => $file_display_name,
-                            'DocumentType' => $doc['DocumentType'] ?? '',
-                            'is_mandatory' => $is_mandatory,
-                            'doc_group' => $doc_group,
-                            'organisation_name' => $org,
-                            'json_download_url' => $json_download_url,
-                            'docx_download_url' => $docx_download_url,
-                            'markdown' => $doc['markdown'] ?? '',
-                        ];
-
-                        $results[] = $doc_entry;
-
-                        if (!isset($groupedDocs[$org])) $groupedDocs[$org] = [];
-                        if (!isset($groupedDocs[$org][$doc_group])) $groupedDocs[$org][$doc_group] = [];
-                        $groupedDocs[$org][$doc_group][] = $doc_entry;
-                    }
-                }
-            }
-            // Reorder grouping
-            foreach ($groupedDocs as $org => $groupdocs) {
-                $orderedGroups = [];
-                foreach ($groupOrder as $g) {
-                    if (isset($groupdocs[$g])) $orderedGroups[$g] = $groupdocs[$g];
-                }
-                foreach ($groupdocs as $g => $docs) {
-                    if (!isset($orderedGroups[$g])) $orderedGroups[$g] = $docs;
-                }
-                $groupedDocs[$org] = $orderedGroups;
-            }
-        } else {
-            Log::warning("[DocsGenerator][index] Directory does NOT exist: $user_docs_dir");
-        }
-
-        // Accept flash from redirect for possible status messages
-        $flash = session()->all();
-        $status = $flash['status'] ?? 'success';
-        $error_message = $flash['error_message'] ?? null;
-
-        return view('agentic_ai.docs_generator_agent', [
-            'groupedDocs' => $groupedDocs,
-            'results' => $results,
-            'status' => $status,
-            'error_message' => $error_message,
-        ]);
-    }*/
-  
   
   // ---------- The listing/index method (displays grouped docs) ----------
-public function index()
+  public function index()
 {
     $userId = (string)auth()->id();
     $groupedDocs = [];
@@ -359,7 +227,144 @@ public function index()
     Log::info("[DocsGenerator][index] userId: $userId, user_docs_dir: $user_docs_dir");
 
     $groupOrder = ['Policy', 'Plan', 'Procedure', 'Register/Log', 'Other'];
-    $orgNameForAllDocs = null;   // <-- This will store the organization name, once found.
+
+    if (is_dir($user_docs_dir)) {
+        Log::info("[DocsGenerator][index] Directory exists: $user_docs_dir");
+
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($user_docs_dir)) as $file) {
+            if (
+                $file->isFile() &&
+                strtolower($file->getExtension()) === 'json' &&
+                strpos($file->getPath(), 'generated') !== false
+            ) {
+                $doc_data = json_decode(file_get_contents($file->getPathname()), true);
+
+                // Support old/new formats
+                if (isset($doc_data['DocumentType'])) {
+                    $docs_out = [$doc_data];
+                } elseif (isset($doc_data['documents'])) {
+                    $docs_out = $doc_data['documents'];
+                } else {
+                    continue;
+                }
+
+                foreach ($docs_out as $doc) {
+                    $rel_dir = basename(dirname($file->getPathname()));
+                    $json_name = $file->getBasename();
+                    $docx_name = str_replace('.json', '.docx', $json_name);
+                    $docx_path = $file->getPath() . DIRECTORY_SEPARATOR . $docx_name;
+                    $has_docx = file_exists($docx_path);
+
+                    $file_display_name = $doc['file_display_name'] ?? null;
+                    if (!$file_display_name) {
+                        $tmp = $json_name;
+                        $tmp = str_replace('_generated', '', $tmp);
+                        $tmp = str_replace('.json', '', $tmp);
+                        $tmp = str_replace('_', ' ', $tmp);
+                        $file_display_name = ucwords(trim($tmp));
+                    }
+
+                    $doc_group = $doc['doc_group'] ?? null;
+                    if (!$doc_group) {
+                        $dt = strtolower($doc['DocumentType'] ?? '');
+                        if (strpos($dt, 'policy') !== false) $doc_group = 'Policy';
+                        elseif (strpos($dt, 'plan') !== false) $doc_group = 'Plan';
+                        elseif (strpos($dt, 'procedure') !== false || strpos($dt, 'process') !== false) $doc_group = 'Procedure';
+                        elseif (preg_match('/register|log|record/', $dt)) $doc_group = 'Register/Log';
+                        else $doc_group = 'Other';
+                    }
+
+                    $is_mandatory = $doc['is_mandatory'] ?? null;
+                    if ($is_mandatory === null) {
+                        $lob = strtolower($doc['LegalOrBestPractice'] ?? '');
+                        $is_mandatory = (strpos($lob, 'mandatory') !== false);
+                    }
+
+                    // --- Extract organisation_name robustly ---
+                    if (!empty($doc['organisation_name'])) {
+                        $org = $doc['organisation_name'];
+                    } elseif (!empty($doc['OrganisationName'])) {
+                        $org = $doc['OrganisationName'];
+                    } else {
+                        // Fallback: try from filename
+                        $base = preg_replace('/\.json$/i', '', $json_name);
+                        if (preg_match('/^(.*)__\d+$/', $base, $m)) {
+                            $org_str = $m[1];
+                            $org = trim(str_replace('_', ' ', $org_str));
+                        } else {
+                            $org = trim(str_replace('_', ' ', $base));
+                        }
+                        if(!$org) $org = 'Unknown Organisation';
+                    }
+
+                    $json_download_url = route('agenticai.docs.json_download', [
+                        'user_id' => $userId,
+                        'filename' => $rel_dir . '/' . $json_name,
+                    ]);
+                    $docx_download_url = $has_docx ? route('agenticai.docs.docx_download', [
+                        'user_id' => $userId,
+                        'filename' => $rel_dir . '/' . $docx_name,
+                    ]) : '';
+
+                    $doc_entry = [
+                        'file_display_name' => $file_display_name,
+                        'DocumentType' => $doc['DocumentType'] ?? '',
+                        'is_mandatory' => $is_mandatory,
+                        'doc_group' => $doc_group,
+                        'organisation_name' => $org,
+                        'json_download_url' => $json_download_url,
+                        'docx_download_url' => $docx_download_url,
+                        'markdown' => $doc['markdown'] ?? '',
+                    ];
+
+                    $results[] = $doc_entry;
+
+                    if (!isset($groupedDocs[$org])) $groupedDocs[$org] = [];
+                    if (!isset($groupedDocs[$org][$doc_group])) $groupedDocs[$org][$doc_group] = [];
+                    $groupedDocs[$org][$doc_group][] = $doc_entry;
+                }
+            }
+        }
+        // Reorder grouping
+        foreach ($groupedDocs as $org => $groupdocs) {
+            $orderedGroups = [];
+            foreach ($groupOrder as $g) {
+                if (isset($groupdocs[$g])) $orderedGroups[$g] = $groupdocs[$g];
+            }
+            foreach ($groupdocs as $g => $docs) {
+                if (!isset($orderedGroups[$g])) $orderedGroups[$g] = $docs;
+            }
+            $groupedDocs[$org] = $orderedGroups;
+        }
+    } else {
+        Log::warning("[DocsGenerator][index] Directory does NOT exist: $user_docs_dir");
+    }
+
+    // Accept flash from redirect for possible status messages
+    $flash = session()->all();
+    $status = $flash['status'] ?? 'success';
+    $error_message = $flash['error_message'] ?? null;
+
+    return view('agentic_ai.docs_generator_agent', [
+        'groupedDocs' => $groupedDocs,
+        'results' => $results,
+        'status' => $status,
+        'error_message' => $error_message,
+    ]);
+}
+  
+  
+/*public function index()
+{
+    $userId = (string)auth()->id();
+    $groupedDocs = [];
+    $results = [];
+    $user_docs_dir = base_path('databreachmgmt/' . $userId);
+
+    Log::info("[DocsGenerator][index] userId: $userId, user_docs_dir: $user_docs_dir");
+
+    $groupOrder = ['Policy', 'Plan', 'Procedure', 'Register/Log', 'Other'];
+    //$orgNameForAllDocs = null;   // <-- This will store the organization name, once found.
 
     if (is_dir($user_docs_dir)) {
         Log::info("[DocsGenerator][index] Directory exists: $user_docs_dir");
@@ -481,7 +486,7 @@ public function index()
         'status' => $status,
         'error_message' => $error_message,
     ]);
-}
+}*/
   
   	public function deleteDocument(Request $request)
 {

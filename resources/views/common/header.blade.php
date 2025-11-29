@@ -1,4 +1,3 @@
-
 <!--================ Header Menu Area start =================-->
 <?php
     $lang = Session::get('language');
@@ -15,23 +14,12 @@
   #mainMenuBar {
     transition: opacity 0.5s;
   }
-
-  /* Nested dropdown (desktop) */
-  .dropdown-submenu {
-    position: relative;
-  }
+  .dropdown-submenu { position: relative; }
   .dropdown-submenu > .dropdown-menu {
-    top: 0;
-    left: 100%;
-    margin-top: -6px;
-    margin-left: .2rem;
-    border-radius: 0.5rem;
-    min-width: 240px;
-    display: none;
+    top: 0; left: 100%; margin-top: -6px; margin-left: .2rem;
+    border-radius: 0.5rem; min-width: 240px; display: none;
   }
-  .dropdown-submenu .dropdown-menu.show {
-    display: block;
-  }
+  .dropdown-submenu .dropdown-menu.show { display: block; }
 </style>
 @endpush
 
@@ -51,8 +39,7 @@
                   <stop offset="100%" stop-color="#36d399"/>
                 </linearGradient>
               </defs>
-              <path d="M48 8C67 17 84 20 84 37c0 38-27.5 50-36 54C39.5 87 12 75 12 37c0-17 17-20 36-29z"
-                fill="#fff" stroke="url(#g1)" stroke-width="5"/>
+              <path d="M48 8C67 17 84 20 84 37c0 38-27.5 50-36 54C39.5 87 12 75 12 37c0-17 17-20 36-29z" fill="#fff" stroke="url(#g1)" stroke-width="5"/>
               <g stroke="#1877c2" stroke-width="1.7">
                 <circle cx="48" cy="27" r="5" fill="#36d399"/>
                 <circle cx="33" cy="40" r="3.5" fill="#95dbfa"/>
@@ -69,7 +56,6 @@
             </svg>
           </span>
           <span style="font-size:2.2em;font-weight:700;color:#1877c2;letter-spacing:-0.04em;">
-            
             mochan<strong style="color:#36d399;">ai.com</strong>
           </span>
         </a>
@@ -126,28 +112,15 @@
                       <i class="fas fa-robot mr-2"></i> Orchestrator
                     </a>
                   </li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li class="dropdown-submenu">
-                    <a class="dropdown-item submenu-toggle" href="#" aria-expanded="false" aria-haspopup="true">
+                  <li>
+                    <a class="dropdown-item" href="{{ route('agentic_ai.compliance.breach.index') }}">
                       <i class="fas fa-shield-alt mr-2"></i> Breach response
                     </a>
-                    <ul class="dropdown-menu" aria-label="Breach response sub-menu">
-                      <li>
-                        <a class="dropdown-item" href="/databreach/events/create">
-                          <i class="fas fa-bolt mr-2" style="color:#e8ba3a;"></i> New incident
-                        </a>
-                      </li>
-                      <li>
-                        <a class="dropdown-item" href="{{ route('agentic_ai.compliance') }}">
-                          <i class="fas fa-user-check mr-2" style="color:#36d399;"></i> Triage &amp; assessment
-                        </a>
-                      </li>
-                      <li>
-                        <a class="dropdown-item" href="{{ route('agenticai.docs_agent.index') }}">
-                          <i class="fas fa-balance-scale mr-2" style="color:#1877c2;"></i> Governance &amp; docs
-                        </a>
-                      </li>
-                    </ul>
+                  </li>
+                  <li>
+                    <a class="dropdown-item" href="{{ route('agenticai.docs_agent.index') }}">
+                      <i class="fas fa-balance-scale mr-2"></i> Governance &amp; docs
+                    </a>
                   </li>
                 </ul>
               </div>
@@ -194,13 +167,13 @@
                 </a>
                 <ul class="dropdown-menu" aria-labelledby="setupDropdown" style="min-width:240px;">
                   <li>
-                    <a class="dropdown-item" href="{{ route('wizard.dashboard') }}">
-                      <i class="fa fa-database mr-2"></i> Data sources
+                    <a class="dropdown-item" href="{{ route('wizard.essentialSetup') }}">
+                      <i class="fa fa-cogs mr-2 text-18"></i> Essential Setup
                     </a>
                   </li>
                   <li>
-                    <a class="dropdown-item" href="{{ route('wizard.step1') }}">
-                      <i class="fa fa-plus-square mr-2"></i> Add source
+                    <a class="dropdown-item" href="{{ route('wizard.dashboard') }}">
+                      <i class="fa fa-database mr-2"></i> Data Source Setup
                     </a>
                   </li>
                 </ul>
@@ -271,17 +244,8 @@
               </a>
               <ul id="mobileSubMenuAgents" style="display:none;margin:0;padding:0 3px 8px 28px;">
                 <li><a href="/agentic-ai/chatorchestrator" class="mobile-subitem" style="font-size:.98em;"><i class="fas fa-robot mr-1" style="color:#1877c2;"></i> Orchestrator</a></li>
-                <li style="margin-top:4px;">
-                  <a href="#" onclick="event.preventDefault();toggleMobileSection('Breach');" style="font-weight:700;font-size:1.0em;display:flex;align-items:center;">
-                    <i class="fas fa-shield-alt mr-2" style="color:#36d399;"></i> Breach response
-                    <span id="mobileMenuArrowBreach" style="margin-left:auto;font-size:1.08em;transition:.2s;">&#9662;</span>
-                  </a>
-                  <ul id="mobileSubMenuBreach" style="display:none;margin:0;padding:2px 3px 5px 26px;">
-                    <li><a href="/databreach/events/create" class="mobile-subitem" style="font-size:.96em;"><i class="fas fa-bolt mr-1" style="color:#e8ba3a;"></i> New incident</a></li>
-                    <li><a href="{{ route('agentic_ai.compliance') }}" class="mobile-subitem" style="font-size:.96em;"><i class="fas fa-user-check mr-1" style="color:#36d399;"></i> Triage &amp; assessment</a></li>
-                    <li><a href="{{ route('agenticai.docs_agent.index') }}" class="mobile-subitem" style="font-size:.96em;"><i class="fas fa-balance-scale mr-1" style="color:#1877c2;"></i> Governance &amp; docs</a></li>
-                  </ul>
-                </li>
+                <li><a href="{{ route('agentic_ai.compliance.breach.index') }}" class="mobile-subitem" style="font-size:.98em;"><i class="fas fa-shield-alt mr-1" style="color:#36d399;"></i> Breach response</a></li>
+                <li><a href="{{ route('agenticai.docs_agent.index') }}" class="mobile-subitem" style="font-size:.98em;"><i class="fas fa-balance-scale mr-1" style="color:#1877c2;"></i> Governance &amp; docs</a></li>
               </ul>
             </li>
 
@@ -320,28 +284,28 @@
                 <span id="mobileMenuArrowSetup" style="margin-left:auto;font-size:1.22em;transition:.2s;" aria-label="expand">&#9662;</span>
               </a>
               <ul id="mobileSubMenuSetup" style="display:none; margin:0; padding-left:19px;">
-                <li><a href="{{ route('wizard.dashboard') }}" class="mobile-subitem" style="font-size:.99em;"><i class="fa fa-database mr-1" style="color:#1877c2;"></i> Data sources</a></li>
-                <li><a href="{{ route('wizard.step1') }}" class="mobile-subitem" style="font-size:.99em;"><i class="fa fa-plus-square mr-1" style="color:#36d399;"></i> Add source</a></li>
+                <li><a href="{{ route('wizard.essentialSetup') }}" class="mobile-subitem" style="font-size:.99em;"><i class="fa fa-cogs mr-2" style="color:#36d399;"></i> Essential Setup</a></li>
+                <li><a href="{{ route('wizard.dashboard') }}" class="mobile-subitem" style="font-size:.99em;"><i class="fa fa-database mr-1" style="color:#1877c2;"></i> Data Source Setup</a></li>
               </ul>
             </li>
 
             <li><a href="{{ url('users/profile') }}"><i class="far fa-user-circle mr-3"></i>{{ trans('messages.utility.profile') }}</a></li>
             <li><a href="{{ url('logout') }}"><i class="fas fa-sign-out-alt mr-3"></i>{{ trans('messages.header.logout') }}</a></li>
 
-            @else
-              <li><a href="{{ url('signup') }}"><i class="fas fa-stream mr-3"></i>{{ trans('messages.sign_up.sign_up') }}</a></li>
-              <li><a href="{{ url('login') }}"><i class="far fa-list-alt mr-3"></i>{{ trans('messages.header.login') }}</a></li>
-            @endif
+          @else
+            <li><a href="{{ url('signup') }}"><i class="fas fa-stream mr-3"></i>{{ trans('messages.sign_up.sign_up') }}</a></li>
+            <li><a href="{{ url('login') }}"><i class="far fa-list-alt mr-3"></i>{{ trans('messages.header.login') }}</a></li>
+          @endif
 
-            @if(Auth::check())
-              @if(Request::segment(1) != 'help')
-                <a href="{{ route('wizard.step1') }}">
-                  <button class="btn vbtn-outline-success text-14 font-weight-700 pl-5 pr-5 pt-3 pb-3">
-                    Add data source
-                  </button>
-                </a>
-              @endif
+          @if(Auth::check())
+            @if(Request::segment(1) != 'help')
+              <a href="{{ route('wizard.step1') }}">
+                <button class="btn vbtn-outline-success text-14 font-weight-700 pl-5 pr-5 pt-3 pb-3">
+                  Add data source
+                </button>
+              </a>
             @endif
+          @endif
         </ul>
       </div>
     </div>
@@ -369,7 +333,7 @@ document.addEventListener("DOMContentLoaded", function() {
     });
   }
 
-  // Desktop: toggle nested dropdown submenus (Breach response, Visualizations)
+  // Desktop: toggle nested dropdown submenus (Visualizations)
   (function initNestedDropdowns() {
     var submenuToggles = document.querySelectorAll('.dropdown-submenu > .submenu-toggle');
     submenuToggles.forEach(function(toggle) {

@@ -29,5 +29,9 @@ return [
         'secret' => env('AWS_SECRET_ACCESS_KEY'),
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
+  
+  'agentic_ai' => [
+    'data_breach_url' => env('AGENTIC_AI_DATA_BREACH_URL', 'http://127.0.0.1:8303'),
+	],
 
 ];

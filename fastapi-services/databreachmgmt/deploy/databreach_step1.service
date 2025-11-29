@@ -1,9 +1,12 @@
 # Put this file on your server at /etc/systemd/system/databreach_step1.service
+#sudo lsof -i :8300
+# sudo systemctl restart databreach_step1
 
 #sudo systemctl daemon-reload
 #sudo systemctl enable databreach_step1
 #sudo systemctl start databreach_step1
 #sudo systemctl status databreach_step1
+
 # For logs:
 #sudo tail -f /var/log/databreach_step1.service.log
 #sudo tail -f /var/log/databreach_step1_error.log

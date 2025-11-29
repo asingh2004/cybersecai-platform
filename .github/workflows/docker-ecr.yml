@@ -5,8 +5,13 @@ on:
     branches: [main, master, staging]
   workflow_dispatch:
 
+concurrency:
+  group: ecs-${{ github.ref_name }}
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
+  CLUSTER_NAME: mochanai-staging-ecs-cluster
 
 jobs:
   build_push_and_deploy:
@@ -28,394 +33,224 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Download all necessary base task defs (download once for each task-def file)
-      - name: Download Laravel App TaskDef
+      - name: Set common env
+        id: set-env
         run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-laravel-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > base-td-laravel-app.json
+          echo "ECR=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_OUTPUT
+          echo "SHA=${GITHUB_SHA}" >> $GITHUB_OUTPUT
 
-      - name: Download Agentic App TaskDef
+      # Build and push all images with immutable SHA tag (also push :latest for human convenience)
+      - name: Build and push images - Laravel (php/nginx)
         run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-agentic-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > base-td-agentic-app.json
+          ECR=${{ steps.set-env.outputs.ECR }}
+          SHA=${{ steps.set-env.outputs.SHA }}
 
-      - name: Download Databreach App TaskDef
+          docker build --target php   -t $ECR/mochanai-staging-laravel-php:$SHA   -t $ECR/mochanai-staging-laravel-php:latest   -f Dockerfile.app .
+          docker build --target nginx -t $ECR/mochanai-staging-laravel-nginx:$SHA -t $ECR/mochanai-staging-laravel-nginx:latest -f Dockerfile.app .
+
+          docker push $ECR/mochanai-staging-laravel-php:$SHA
+          docker push $ECR/mochanai-staging-laravel-php:latest
+          docker push $ECR/mochanai-staging-laravel-nginx:$SHA
+          docker push $ECR/mochanai-staging-laravel-nginx:latest
+
+      - name: Build and push image - Webhook Server
         run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-databreach-app \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > base-td-databreach-app.json
+          ECR=${{ steps.set-env.outputs.ECR }}
+          SHA=${{ steps.set-env.outputs.SHA }}
+          docker build -t $ECR/mochanai-staging-webhook-server:$SHA -t $ECR/mochanai-staging-webhook-server:latest -f ./fastapi-services/webhook/Dockerfile.fastapi ./fastapi-services/webhook
+          docker push $ECR/mochanai-staging-webhook-server:$SHA
+          docker push $ECR/mochanai-staging-webhook-server:latest
 
-      - name: Download Privacy Discovery TaskDef
+      - name: Build and push images - Agentic (prod, orchestrator, service)
         run: |
-          aws ecs describe-task-definition \
-            --task-definition mochanai-staging-prod-db-privacy-discovery-service \
-            --region ${{ env.AWS_REGION }} \
-            --query 'taskDefinition' > base-td-privacy-discovery.json
+          ECR=${{ steps.set-env.outputs.ECR }}
+          SHA=${{ steps.set-env.outputs.SHA }}
+          # All three currently build from same Dockerfile path you provided
+          docker build -t $ECR/mochanai-staging-prod-agentic-orchestrator-service:$SHA -t $ECR/mochanai-staging-prod-agentic-orchestrator-service:latest -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build -t $ECR/mochanai-staging-agentic-orchestrator-service:$SHA  -t $ECR/mochanai-staging-agentic-orchestrator-service:latest  -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker build -t $ECR/mochanai-staging-agentic-service:$SHA              -t $ECR/mochanai-staging-agentic-service:latest              -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
 
-      #################################################
-      # 1. Laravel PHP-FPM
-      #################################################
-      - name: Build and Push Laravel PHP-FPM
-        id: build_push_laravel_php
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+          docker push $ECR/mochanai-staging-prod-agentic-orchestrator-service:$SHA
+          docker push $ECR/mochanai-staging-prod-agentic-orchestrator-service:latest
+          docker push $ECR/mochanai-staging-agentic-orchestrator-service:$SHA
+          docker push $ECR/mochanai-staging-agentic-orchestrator-service:latest
+          docker push $ECR/mochanai-staging-agentic-service:$SHA
+          docker push $ECR/mochanai-staging-agentic-service:latest
+
+      - name: Build and push images - Databreach (event advisor + steps)
         run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-laravel-php"
-          docker build --target php \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f Dockerfile.app .
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
+          ECR=${{ steps.set-env.outputs.ECR }}
+          SHA=${{ steps.set-env.outputs.SHA }}
 
-      - name: Render TaskDef (Laravel PHP)
-        id: render-laravel-php
+          docker build -t $ECR/mochanai-staging-databreach-event-advisor:$SHA -t $ECR/mochanai-staging-databreach-event-advisor:latest -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build -t $ECR/mochanai-staging-databreach-step1:$SHA         -t $ECR/mochanai-staging-databreach-step1:latest         -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build -t $ECR/mochanai-staging-databreach-step2:$SHA         -t $ECR/mochanai-staging-databreach-step2:latest         -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker build -t $ECR/mochanai-staging-databreach-step3:$SHA         -t $ECR/mochanai-staging-databreach-step3:latest         -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+
+          docker push $ECR/mochanai-staging-databreach-event-advisor:$SHA
+          docker push $ECR/mochanai-staging-databreach-event-advisor:latest
+          docker push $ECR/mochanai-staging-databreach-step1:$SHA
+          docker push $ECR/mochanai-staging-databreach-step1:latest
+          docker push $ECR/mochanai-staging-databreach-step2:$SHA
+          docker push $ECR/mochanai-staging-databreach-step2:latest
+          docker push $ECR/mochanai-staging-databreach-step3:$SHA
+          docker push $ECR/mochanai-staging-databreach-step3:latest
+
+      - name: Build and push image - PROD DB Privacy Discovery
+        run: |
+          ECR=${{ steps.set-env.outputs.ECR }}
+          SHA=${{ steps.set-env.outputs.SHA }}
+          docker build -t $ECR/mochanai-staging-prod-db-privacy-discovery-service:$SHA -t $ECR/mochanai-staging-prod-db-privacy-discovery-service:latest -f ./fastapi-services/Databases/Dockerfile.fastapi ./fastapi-services/Databases
+          docker push $ECR/mochanai-staging-prod-db-privacy-discovery-service:$SHA
+          docker push $ECR/mochanai-staging-prod-db-privacy-discovery-service:latest
+
+      # Download base task definitions once
+      - name: Download TaskDefs
+        run: |
+          aws ecs describe-task-definition --task-definition mochanai-staging-laravel-app                         --query 'taskDefinition' > base-td-laravel-app.json
+          aws ecs describe-task-definition --task-definition mochanai-staging-agentic-app                         --query 'taskDefinition' > base-td-agentic-app.json
+          aws ecs describe-task-definition --task-definition mochanai-staging-databreach-app                      --query 'taskDefinition' > base-td-databreach-app.json
+          aws ecs describe-task-definition --task-definition mochanai-staging-prod-db-privacy-discovery-service   --query 'taskDefinition' > base-td-privacy-discovery.json
+
+      # Render and deploy Laravel (update all containers, deploy once)
+      - name: Render TD Laravel - php
+        id: td-laravel-php
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: base-td-laravel-app.json
           container-name: laravel-php
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-php:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-laravel-php:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Laravel PHP)
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.render-laravel-php.outputs.task-definition }}
-          service: mochanai-staging-laravel-app
-          cluster: mochanai-staging-ecs-cluster
-          wait-for-service-stability: true
-
-      #################################################
-      # 2. Laravel Nginx
-      #################################################
-      - name: Build and Push Laravel Nginx
-        id: build_push_laravel_nginx
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-laravel-nginx"
-          docker build --target nginx \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f Dockerfile.app .
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Laravel Nginx)
-        id: render-laravel-nginx
+      - name: Render TD Laravel - nginx
+        id: td-laravel-nginx
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: base-td-laravel-app.json
+          task-definition: ${{ steps.td-laravel-php.outputs.task-definition }}
           container-name: laravel-nginx
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-laravel-nginx:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-laravel-nginx:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Laravel Nginx)
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.render-laravel-nginx.outputs.task-definition }}
-          service: mochanai-staging-laravel-app
-          cluster: mochanai-staging-ecs-cluster
-          wait-for-service-stability: true
-
-      #################################################
-      # 3. Webhook Server
-      #################################################
-      - name: Build and Push Webhook Server
-        id: build_push_webhook_server
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-webhook-server"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/webhook/Dockerfile.fastapi ./fastapi-services/webhook
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Webhook)
-        id: render-webhook
+      - name: Render TD Laravel - webhook
+        id: td-laravel-webhook
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: base-td-laravel-app.json
+          task-definition: ${{ steps.td-laravel-nginx.outputs.task-definition }}
           container-name: webhook_server
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-webhook-server:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-webhook-server:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Webhook)
+      - name: Deploy Laravel app
+        id: deploy-laravel
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          task-definition: ${{ steps.render-webhook.outputs.task-definition }}
+          task-definition: ${{ steps.td-laravel-webhook.outputs.task-definition }}
           service: mochanai-staging-laravel-app
-          cluster: mochanai-staging-ecs-cluster
+          cluster: ${{ env.CLUSTER_NAME }}
           wait-for-service-stability: true
 
-      #################################################
-      # 4. PROD Agentic Orchestrator Service
-      #################################################
-      - name: Build and Push PROD Agentic Orchestrator
-        id: build_push_prod_agentic_orch
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-prod-agentic-orchestrator-service"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (PROD Agentic Orchestrator)
-        id: render-prod-agentic-orchestrator
+      # Render and deploy Agentic app (all containers, one deploy)
+      - name: Render TD Agentic - prod orchestrator
+        id: td-agentic-prod-orch
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: base-td-agentic-app.json
           container-name: prod_agentic_orchestrator_service
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-agentic-orchestrator-service:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-prod-agentic-orchestrator-service:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (PROD Agentic Orchestrator)
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.render-prod-agentic-orchestrator.outputs.task-definition }}
-          service: mochanai-staging-agentic-app
-          cluster: mochanai-staging-ecs-cluster
-          wait-for-service-stability: true
-
-      #################################################
-      # 5. Agentic Orchestrator (non-prod)
-      #################################################
-      - name: Build and Push Agentic Orchestrator
-        id: build_push_agentic_orch
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-agentic-orchestrator-service"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Agentic Orchestrator)
-        id: render-agentic-orchestrator
+      - name: Render TD Agentic - orchestrator
+        id: td-agentic-orch
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: base-td-agentic-app.json
+          task-definition: ${{ steps.td-agentic-prod-orch.outputs.task-definition }}
           container-name: agentic_orchestrator_service
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-orchestrator-service:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-agentic-orchestrator-service:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Agentic Orchestrator)
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.render-agentic-orchestrator.outputs.task-definition }}
-          service: mochanai-staging-agentic-app
-          cluster: mochanai-staging-ecs-cluster
-          wait-for-service-stability: true
-
-      #################################################
-      # 6. Agentic Service
-      #################################################
-      - name: Build and Push Agentic Service
-        id: build_push_agentic
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-agentic-service"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Agentic Service)
-        id: render-agentic-service
+      - name: Render TD Agentic - service
+        id: td-agentic-service
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: base-td-agentic-app.json
+          task-definition: ${{ steps.td-agentic-orch.outputs.task-definition }}
           container-name: agentic_service
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-agentic-service:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-agentic-service:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Agentic Service)
+      - name: Deploy Agentic app
+        id: deploy-agentic
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          task-definition: ${{ steps.render-agentic-service.outputs.task-definition }}
+          task-definition: ${{ steps.td-agentic-service.outputs.task-definition }}
           service: mochanai-staging-agentic-app
-          cluster: mochanai-staging-ecs-cluster
+          cluster: ${{ env.CLUSTER_NAME }}
           wait-for-service-stability: true
 
-      #################################################
-      # 7. Databreach Event Advisor
-      #################################################
-      - name: Build and Push Databreach Event Advisor
-        id: build_push_db_event_advisor
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-databreach-event-advisor"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Databreach Event Advisor)
-        id: render-db-event-advisor
+      # Render and deploy Databreach app (all containers, one deploy)
+      - name: Render TD Databreach - event advisor
+        id: td-db-event
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: base-td-databreach-app.json
           container-name: databreach_event_advisor
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-event-advisor:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-databreach-event-advisor:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Databreach Event Advisor)
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.render-db-event-advisor.outputs.task-definition }}
-          service: mochanai-staging-databreach-app
-          cluster: mochanai-staging-ecs-cluster
-          wait-for-service-stability: true
-
-      #################################################
-      # 8. Databreach Step 1
-      #################################################
-      - name: Build and Push Databreach Step 1
-        id: build_push_db_step1
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-databreach-step1"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Databreach Step 1)
-        id: render-db-step1
+      - name: Render TD Databreach - step1
+        id: td-db-step1
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: base-td-databreach-app.json
+          task-definition: ${{ steps.td-db-event.outputs.task-definition }}
           container-name: databreach_step1
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step1:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-databreach-step1:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Databreach Step 1)
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.render-db-step1.outputs.task-definition }}
-          service: mochanai-staging-databreach-app
-          cluster: mochanai-staging-ecs-cluster
-          wait-for-service-stability: true
-
-      #################################################
-      # 9. Databreach Step 2
-      #################################################
-      - name: Build and Push Databreach Step 2
-        id: build_push_db_step2
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-databreach-step2"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Databreach Step 2)
-        id: render-db-step2
+      - name: Render TD Databreach - step2
+        id: td-db-step2
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: base-td-databreach-app.json
+          task-definition: ${{ steps.td-db-step1.outputs.task-definition }}
           container-name: databreach_step2
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step2:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-databreach-step2:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Databreach Step 2)
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.render-db-step2.outputs.task-definition }}
-          service: mochanai-staging-databreach-app
-          cluster: mochanai-staging-ecs-cluster
-          wait-for-service-stability: true
-
-      #################################################
-      # 10. Databreach Step 3
-      #################################################
-      - name: Build and Push Databreach Step 3
-        id: build_push_db_step3
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-databreach-step3"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Databreach Step 3)
-        id: render-db-step3
+      - name: Render TD Databreach - step3
+        id: td-db-step3
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: base-td-databreach-app.json
+          task-definition: ${{ steps.td-db-step2.outputs.task-definition }}
           container-name: databreach_step3
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-databreach-step3:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-databreach-step3:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Databreach Step 3)
+      - name: Deploy Databreach app
+        id: deploy-databreach
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          task-definition: ${{ steps.render-db-step3.outputs.task-definition }}
+          task-definition: ${{ steps.td-db-step3.outputs.task-definition }}
           service: mochanai-staging-databreach-app
-          cluster: mochanai-staging-ecs-cluster
+          cluster: ${{ env.CLUSTER_NAME }}
           wait-for-service-stability: true
 
-      #################################################
-      # 11. PROD DB Privacy Discovery Service
-      #################################################
-      - name: Build and Push PROD DB Privacy Discovery Service
-        id: build_push_prod_db_privacy
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          ECR_REPO="$ECR_REGISTRY/mochanai-staging-prod-db-privacy-discovery-service"
-          docker build \
-            -t $ECR_REPO:latest \
-            -t $ECR_REPO:$IMAGE_TAG \
-            -f ./fastapi-services/Databases/Dockerfile.fastapi ./fastapi-services/Databases
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:$IMAGE_TAG
-
-      - name: Render TaskDef (Privacy Discovery)
-        id: render-privacy-discovery
+      # Render and deploy Privacy Discovery
+      - name: Render TD Privacy Discovery
+        id: td-privacy
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: base-td-privacy-discovery.json
           container-name: prod_db_privacy_discovery_service
-          image: ${{ steps.login-ecr.outputs.registry }}/mochanai-staging-prod-db-privacy-discovery-service:latest
+          image: ${{ steps.set-env.outputs.ECR }}/mochanai-staging-prod-db-privacy-discovery-service:${{ steps.set-env.outputs.SHA }}
 
-      - name: Deploy Service (Privacy Discovery)
+      - name: Deploy Privacy Discovery service
+        id: deploy-privacy
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          task-definition: ${{ steps.render-privacy-discovery.outputs.task-definition }}
+          task-definition: ${{ steps.td-privacy.outputs.task-definition }}
           service: mochanai-staging-prod-db-privacy-discovery-service
-          cluster: mochanai-staging-ecs-cluster
+          cluster: ${{ env.CLUSTER_NAME }}
           wait-for-service-stability: true
+
+      # Diagnostics on failure
+      - name: Dump ECS service events on failure
+        if: failure()
+        run: |
+          set +e
+          CLUSTER=${{ env.CLUSTER_NAME }}
+          for SVC in mochanai-staging-laravel-app mochanai-staging-agentic-app mochanai-staging-databreach-app mochanai-staging-prod-db-privacy-discovery-service; do
+            echo "===== Service: $SVC ====="
+            aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --query 'services[0].events[0:20]'
+            TASKS=$(aws ecs list-tasks --cluster "$CLUSTER" --service-name "$SVC" --desired-status STOPPED --query 'taskArns' --output text)
+            if [ -n "$TASKS" ]; then
+              aws ecs describe-tasks --cluster "$CLUSTER" --tasks $TASKS --query 'tasks[].{taskArn:taskArn,stopCode:stopCode,stoppedReason:stoppedReason,containers:containers[].reason}'
+            fi
+          done

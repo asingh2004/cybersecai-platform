@@ -1,0 +1,138 @@
+version: "3.9"
+
+services:
+  # ────────────── Laravel PHP‑FPM
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+      target: php
+    container_name: laravel-php
+    volumes:
+      - .:/var/www
+    expose:
+      - "9000"
+    restart: unless-stopped
+
+  # ────────────── Laravel Nginx
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+      target: nginx
+    container_name: laravel-nginx
+    ports:
+      - "8080:80"
+    depends_on:
+      - php
+    restart: unless-stopped
+
+  # ────────────── Agentic Orchestrator
+  agentic_orchestrator_service:
+    build:
+      context: ./fastapi-services/agenticai
+      dockerfile: Dockerfile.fastapi
+    image: agentic_orchestrator_service:latest
+    command: uvicorn agentic_orchestrator_service:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8223:8000"
+    restart: unless-stopped
+
+  # ────────────── Agentic Service
+  agentic_service:
+    build:
+      context: ./fastapi-services/agenticai
+      dockerfile: Dockerfile.fastapi
+    image: agentic_service:latest
+    command: uvicorn agentic_service:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8222:8000"
+    restart: unless-stopped
+
+  # ────────────── Databreach Event Advisor
+  databreach_event_advisor:
+    build:
+      context: ./fastapi-services/databreachmgmt
+      dockerfile: Dockerfile.fastapi
+    image: databreach_event_advisor:latest
+    command: uvicorn databreach_event_advisor:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8303:8000"
+    restart: unless-stopped
+
+  # ────────────── Databreach Step 1
+  databreach_step1:
+    build:
+      context: ./fastapi-services/databreachmgmt
+      dockerfile: Dockerfile.fastapi
+    image: databreach_step1:latest
+    command: uvicorn databreach_step1:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8300:8000"
+    restart: unless-stopped
+
+  # ────────────── Databreach Step 2
+  databreach_step2:
+    build:
+      context: ./fastapi-services/databreachmgmt
+      dockerfile: Dockerfile.fastapi
+    image: databreach_step2:latest
+    command: uvicorn databreach_step2:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8301:8000"
+    restart: unless-stopped
+
+  # ────────────── Databreach Step 3
+  databreach_step3:
+    build:
+      context: ./fastapi-services/databreachmgmt
+      dockerfile: Dockerfile.fastapi
+    image: databreach_step3:latest
+    command: uvicorn databreach_step3:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8302:8000"
+    restart: unless-stopped
+
+  # ────────────── Prod Agentic Orchestrator
+  prod_agentic_orchestrator_service:
+    build:
+      context: ./fastapi-services/agenticai
+      dockerfile: Dockerfile.fastapi
+    image: prod_agentic_orchestrator_service:latest
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8224:8000"
+    restart: unless-stopped
+
+  # ────────────── Prod DB Privacy Discovery
+  prod_db_privacy_discovery_service:
+    build:
+      context: ./fastapi-services/Databases
+      dockerfile: Dockerfile.fastapi
+    image: prod_db_privacy_discovery_service:latest
+    command: uvicorn db_privacy_discover:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8205:8000"
+    restart: unless-stopped
+
+  # ────────────── Prod Healing API (commented out)
+  # prod_healingapi_service:
+  #   build:
+  #     context: ./fastapi-services/healingapi
+  #     dockerfile: Dockerfile.fastapi
+  #   image: prod_healingapi_service:latest
+  #   command: uvicorn healingapi.healingapi_server:app --host 0.0.0.0 --port 8000
+  #   ports:
+  #     - "8305:8000"
+  #   restart: unless-stopped
+
+  # ────────────── Webhook Server
+  webhook_server:
+    build:
+      context: ./fastapi-services/webhook
+      dockerfile: Dockerfile.fastapi
+    image: webhook_server:latest
+    command: uvicorn webhook_server:app --host 0.0.0.0 --port 8000
+    ports:
+      - "5000:8000"
+    restart: unless-stopped

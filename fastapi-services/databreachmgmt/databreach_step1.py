@@ -5,73 +5,74 @@
 #      -H "Content-Type: application/json" \
 #      -d '{"jurisdiction":"Australia","organisation_name":"Test Org Pty Ltd"}'
 
-import os
-import openai
 import json
+import os
 import re
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
+from openai import OpenAI
 from pydantic import BaseModel
 
-# --- FastAPI setup ---
 app = FastAPI()
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# --- OpenAI setup ---
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY environment variable not set.")
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-def output_guardrails(text: str) -> None:
-    """Raise error if content violates basic safety or exceeds max length."""
-    if len(text) > 8000:
+def guardrails(text: str) -> None:
+    if len(text) > 10000:
         raise HTTPException(400, "Output exceeds max length")
-    if any(re.search(rf"\b{w}\b", text, re.I) for w in ['illegal', 'offensive']):
-        raise HTTPException(400, "Inappropriate content detected in LLM Output")
+    if any(re.search(fr"\b{word}\b", text, flags=re.I) for word in ["illegal instructional", "offensive slur"]):
+        raise HTTPException(400, "Content rejected")
 
 class DataBreachDocRequest(BaseModel):
-    jurisdiction: str
     organisation_name: str
+    industry: Optional[str] = ""
+    country: Optional[str] = ""
+    about_business: Optional[str] = ""
+    user_id: Optional[str] = None
+    business_id: Optional[str] = None
 
-@app.post('/agentic/databreach_docs')
-def agentic_databreach_docs(req: DataBreachDocRequest):
-    """
-    Generate a list of key data breach documents (with summary and legal/mandatory marker) in valid JSON.
-    """
+@app.post("/agentic/databreach_docs")
+def generate_doc_catalog(req: DataBreachDocRequest):
+    context = f"""
+Organisation: {req.organisation_name}
+Industry: {req.industry or 'Not specified'}
+Operating Country/Jurisdiction: {req.country or 'Not specified'}
+Business Snapshot: {req.about_business or 'No additional context provided.'}
+""".strip()
+
     prompt = f"""
-You are a multi-jurisdiction expert laywer in data compliance and privacy. For an SME named "{req.organisation_name}" operating in {req.jurisdiction}, create a concise but comprehensive JSON list of the essential documents, policies and procedures that must be in place to manage data breaches. For each, provide:
+You are a senior privacy/compliance lawyer. Produce a JSON array describing all mandatory and best-practice documents needed for this organisation's data breach management framework.
 
-- DocumentType (e.g. Data Breach Response Plan)
-- Purpose (sentence or two)
-- LegalOrBestPractice (Mandatory/Recommended, cite regulations/laws if applicable)
-- BriefDescription (1-line summary of scope/practical use)
+Context:
+{context}
 
-Return a JSON array of these objects. Do not return any introduction or text outside the JSON.
-    """.strip()
+For each document return:
+- "DocumentType": e.g. "Data Breach Response Plan"
+- "Purpose": 1-2 sentences
+- "LegalOrBestPractice": e.g. "Mandatory under Privacy Act" or "Best Practice"
+- "BriefDescription": practical scope/use
+
+Limit to the essentials (policy, plans, procedures, registers, communication templates). Output *only* valid JSON.
+""".strip()
+
     try:
-        resp = client.chat.completions.create(
+        completion = client.chat.completions.create(
             model="gpt-4.1",
-            messages=[
-                {"role": "system", "content": "You are a compliance documentation expert."},
-                {"role": "user", "content": prompt}
-            ],
             temperature=0.2,
-            max_tokens=32768
+            messages=[
+                {"role": "system", "content": "You are a compliance documentation architect."},
+                {"role": "user", "content": prompt}
+            ]
         )
-        text = resp.choices[0].message.content.strip()
-        output_guardrails(text)
-        # Parse, validate and return JSON output
+        text = completion.choices[0].message.content.strip()
+        guardrails(text)
         documents = json.loads(text)
-        assert isinstance(documents, list)
+        if not isinstance(documents, list) or not documents:
+            raise ValueError("JSON list empty or invalid")
         for doc in documents:
-            assert "DocumentType" in doc
-            assert "Purpose" in doc
-            assert "LegalOrBestPractice" in doc
-            assert "BriefDescription" in doc
+            for key in ("DocumentType", "Purpose", "LegalOrBestPractice", "BriefDescription"):
+                if key not in doc:
+                    raise ValueError(f"Missing {key} in document entry")
         return {"documents": documents}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI or JSON error: {str(e)}")
-
-# (Optional for local testing)
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("databreach_docs_llm:app", host="127.0.0.1", port=8300)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"LLM error: {exc}")

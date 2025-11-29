@@ -1,0 +1,151 @@
+name: Build and push all Docker images to ECR
+
+on:
+  push:
+    branches: [main, master, staging]
+  workflow_dispatch:
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 1. Laravel PHP-FPM (php)
+      - name: Build and push Laravel PHP-FPM
+        env:
+          ECR_REPO: mochanai-staging-laravel-php
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build --target php -t $ECR_REPO:$IMAGE_TAG -f Dockerfile.app .
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 2. Laravel NGINX (nginx)
+      - name: Build and push Laravel NGINX
+        env:
+          ECR_REPO: mochanai-staging-laravel-nginx
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build --target nginx -t $ECR_REPO:$IMAGE_TAG -f Dockerfile.app .
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 3. Agentic Orchestrator
+      - name: Build and push Agentic Orchestrator
+        env:
+          ECR_REPO: mochanai-staging-agentic_orchestrator_service
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 4. Agentic Service
+      - name: Build and push Agentic Service
+        env:
+          ECR_REPO: mochanai-staging-agentic_service
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 5. Databreach Event Advisor
+      - name: Build and push Databreach Event Advisor
+        env:
+          ECR_REPO: mochanai-staging-databreach_event_advisor
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 6. Databreach Step 1
+      - name: Build and push Databreach Step 1
+        env:
+          ECR_REPO: mochanai-staging-databreach_step1
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 7. Databreach Step 2
+      - name: Build and push Databreach Step 2
+        env:
+          ECR_REPO: mochanai-staging-databreach_step2
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 8. Databreach Step 3
+      - name: Build and push Databreach Step 3
+        env:
+          ECR_REPO: mochanai-staging-databreach_step3
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/databreachmgmt/Dockerfile.fastapi ./fastapi-services/databreachmgmt
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 9. Prod Agentic Orchestrator Service
+      - name: Build and push Prod Agentic Orchestrator
+        env:
+          ECR_REPO: mochanai-staging-prod_agentic_orchestrator_service
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/agenticai/Dockerfile.fastapi ./fastapi-services/agenticai
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 10. Prod DB Privacy Discovery Service
+      - name: Build and push Prod DB Privacy Discovery
+        env:
+          ECR_REPO: mochanai-staging-prod_db_privacy_discovery_service
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/Databases/Dockerfile.fastapi ./fastapi-services/Databases
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+
+      # 11. Webhook Server
+      - name: Build and push Webhook Server
+        env:
+          ECR_REPO: mochanai-staging-webhook_server
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
+        run: |
+          docker build -t $ECR_REPO:$IMAGE_TAG -f ./fastapi-services/webhook/Dockerfile.fastapi ./fastapi-services/webhook
+          docker tag $ECR_REPO:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
